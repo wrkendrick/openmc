@@ -263,6 +263,13 @@ Nuclide::Nuclide(hid_t group, const std::vector<double>& temperature, int i_nucl
     hid_t fer_group = open_group(group, "fission_energy_release");
     fission_q_prompt_ = read_function(fer_group, "q_prompt");
     fission_q_recov_ = read_function(fer_group, "q_recoverable");
+    fer_betas_ = read_function(fer_group, "betas");
+    fer_delayed_neutrons_ = read_function(fer_group, "delayed_neutrons");
+    fer_delayed_photons_ = read_function(fer_group, "delayed_photons");
+    fer_fragments_ = read_function(fer_group, "fragments");
+    fer_neutrinos_ = read_function(fer_group, "neutrinos");
+    fer_prompt_neutrons_ = read_function(fer_group, "prompt_neutrons");
+    fer_prompt_photons_ = read_function(fer_group, "prompt_photons");
     close_group(fer_group);
   }
 
@@ -294,7 +301,14 @@ void Nuclide::create_derived()
           auto pprod = xt::view(xs_[t], xt::range(j, j+n), XS_PHOTON_PROD);
           for (int k = 0; k < n; ++k) {
             double E = grid_[t].energy[k+j];
-            pprod[k] += xs[k] * (*p.yield_)(E);
+            if (rx->mt_ == 18 || rx->mt_ == 19 || rx->mt_ == 20 || rx->mt_ == 21 || rx->mt_ == 38) {
+                double delayed_ratio = (*fer_delayed_photons_)(E) / (*fer_prompt_photons_)(E);
+                delayed_ratio = delayed_ratio + 1;
+                pprod[k] += xs[k] * (*p.yield_)(E) * delayed_ratio;
+            }
+            else {
+                pprod[k] += xs[k] * (*p.yield_)(E);
+            }
           }
         }
       }

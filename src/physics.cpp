@@ -525,7 +525,14 @@ void sample_photon_product(int i_nuclide, const Particle* p, int* i_rx, int* i_p
     for (int j = 0; j < rx->products_.size(); ++j) {
       if (rx->products_[j].particle_ == Particle::Type::photon) {
         // add to cumulative probability
-        prob += (*rx->products_[j].yield_)(p->E_) * xs;
+        if (rx->mt_ == 18 || rx->mt_ == 19 || rx->mt_ == 20 || rx->mt_ == 21 || rx->mt_ == 38) {
+            double delayed_ratio = (*nuc->fer_delayed_photons_)(p->E_) / (*nuc->fer_prompt_photons_)(p->E_);
+            delayed_ratio = delayed_ratio + 1.0;
+            prob += (*rx->products_[j].yield_)(p->E_) * delayed_ratio * xs;
+        }
+        else {
+            prob += (*rx->products_[j].yield_)(p->E_) * xs;
+        }
 
         *i_rx = i;
         *i_product = j;
