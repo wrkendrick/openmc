@@ -80,6 +80,13 @@ public:
   std::unique_ptr<Function1D> total_nu_; //!< Total neutron yield
   std::unique_ptr<Function1D> fission_q_prompt_; //!< Prompt fission energy release
   std::unique_ptr<Function1D> fission_q_recov_; //!< Recoverable fission energy release
+  std::unique_ptr<Function1D> fer_betas_;
+  std::unique_ptr<Function1D> fer_delayed_neutrons_;
+  std::unique_ptr<Function1D> fer_delayed_photons_;
+  std::unique_ptr<Function1D> fer_fragments_;
+  std::unique_ptr<Function1D> fer_neutrinos_;
+  std::unique_ptr<Function1D> fer_prompt_neutrons_;
+  std::unique_ptr<Function1D> fer_prompt_photons_;
 
   // Resonance scattering information
   bool resonant_ {false};
