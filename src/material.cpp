@@ -28,6 +28,7 @@
 #include "openmc/string_utils.h"
 #include "openmc/thermal.h"
 #include "openmc/xml_interface.h"
+#include "openmc/position.h"
 
 namespace openmc {
 
@@ -196,6 +197,57 @@ Material::Material(pugi::xml_node node)
           densities.push_back(std::stod(get_node_value(node_nuc, "ao")));
         } else {
           densities.push_back(-std::stod(get_node_value(node_nuc, "wo")));
+        }
+
+        // CVMT: Read and store polynomial representation(s) of nuclide densities.
+        if(check_for_node(node_nuc, "poly_coeffs")){
+          continuous_num_density_ = true;
+          auto type = get_node_value(node_nuc, "poly_type");
+          auto coeffs = get_node_array<double>(node_nuc, "poly_coeffs");
+          auto n_coeffs = coeffs.size() - 2; // skip two values for offset 
+          auto order = 0;
+          // Set order based on polynomial type.
+          if (type == "zernike1d") {
+            order = 2 * (n_coeffs - 2);
+          } else if (type == "zernike") {
+            auto p = 1;
+            auto temp_int = 0;
+            while(p < n_coeffs) {
+              p += temp_int + 1;
+              temp_int += 1; 
+            }
+            if(p == n_coeffs) {
+              order = temp_int - 1;
+            } else {
+              fatal_error("Correct polynomial order could not be determined.");
+            }
+          } else if (type == "legendre-x" || type == "legendre-y" || type == "legendre-z") {
+            order = n_coeffs - 1; 
+          } else if (type == "legendre-xy" || type == "legendre-yz" || type == "legendre-xz") {
+            order = n_coeffs - 2; // skip another two offsets 
+            order = order/2 - 1; // assume two dimensions have the same order
+          }
+          // Initialize polynomial property.
+          PolyProperty temp_poly; 
+          temp_poly.set_order(type, order);
+          temp_poly.set_coeffs(coeffs.data());
+          // Process normalization factor.
+          temp_poly.apply_normalization();
+          // Check if axial Legendre polynomial is specified.
+          if (check_for_node(node_nuc, "axial_coeffs")) {
+            auto axial_type = "legendre";
+            auto coeffs_axial = get_node_array<double>(node_nuc, "axial_coeffs");
+            auto n_coeffs_axial = coeffs_axial.size();
+            auto zmin = coeffs_axial[0]; // zmin, zmax, order+1 of coefficients  
+            auto zmax = coeffs_axial[1];
+            auto order_axial = coeffs_axial.size() - 3;
+            // Assign flag to indicate axial distribution using legendre polynomial.
+            temp_poly.axial_ = true;
+            temp_poly.set_order_axial(order_axial);
+            temp_poly.set_axial_offset(zmin, zmax);
+            temp_poly.set_coeffs_axial(&coeffs_axial[2]);
+          }
+          poly_densities_.push_back(temp_poly);
         }
       }
     }
@@ -885,7 +937,13 @@ void Material::calculate_neutron_xs(Particle& p) const
     // ADD TO MACROSCOPIC CROSS SECTION
 
     // Copy atom density of nuclide in material
-    double atom_density = atom_density_(i);
+    double atom_density {0.0};
+    // Check to see if CVMT is used.
+    if (continuous_num_density_ && poly_densities_.size() > i) {
+      atom_density = poly_densities_[i].evaluate(p.coord(p.n_coord()-1).r);
+    } else {
+      atom_density = atom_density_(i);
+    }
 
     // Add contributions to cross sections
     p.macro_xs().total += atom_density * micro.total;
@@ -1048,6 +1106,228 @@ void Material::set_densities(
   // Assign S(a,b) tables
   this->init_thermal();
 }
+
+// CVMT: Set FEs.
+void Material::set_fet(const std::string& fet_type, int order, double radius)
+{
+  Expects(fet_type.size() > 0);
+  Expects(order >= 0);
+  Expects(radius > 0.0);
+
+  int n_coeffs = 0;
+  poly_densities_.resize(nuclide_.size());
+
+  for (gsl::index i = 0; i < nuclide_.size(); ++i) {
+    
+    poly_densities_[i].type_ = fet_type; 
+    poly_densities_[i].order_ = order; 
+    poly_densities_[i].radius_ = radius;
+    if (fet_type == "zernike") {
+      n_coeffs += (order + 1)*(order + 2)/2; 
+      // prcess normalization factor
+      auto ii = 0;     
+      for (int p = 0; p <= order; ++p) {
+        for (int q = -p; q <= p; q = q + 2) {
+          if (q ==0) {
+            poly_densities_[i].poly_norm_[ii] = std::sqrt(p + 1.0);
+          } else {
+            poly_densities_[i].poly_norm_[ii] = std::sqrt(2.0 * p + 2.0);
+          }
+          ii += 1; 
+        }
+      }
+    } else if (fet_type == "zernike1d") {
+      n_coeffs += order/2 + 1;
+      // process normalization factor 
+      auto ii = 0;
+      for (int p = 0; p <= order; p=p+2) {
+        poly_densities_[i].poly_norm_[ii] = std::sqrt(p + 1.0);
+        ii += 1; 
+      }
+    } else if (fet_type == "legendre") {
+      n_coeffs += order + 1;
+    }
+    poly_densities_[i].n_coeffs_ = n_coeffs;
+  }
+  continuous_num_density_ = true;
+}
+
+// CVMT: Set offsets for FEs.
+void Material::set_offsets_fet(const std::vector<double>& x, const std::vector<double>& y)
+{
+  auto n = x.size();
+  auto m = y.size();
+
+  Expects(n > 0);
+  Expects(m > 0);
+  Expects(n == m);
+
+  if (continuous_num_density_) {
+	  poly_densities_.resize(n);
+    for (gsl::index i = 0; i < n; ++i) {
+	    poly_densities_[i].center_offset_[0] = x[i];
+	    poly_densities_[i].center_offset_[1] = y[i];
+    }
+  }
+}
+
+// CVMT: Disable FE designation in material.
+void Material::disable_fet()
+{
+  poly_densities_.clear();
+  continuous_num_density_ = false;
+}
+
+// CVMT: Set polynomial density representation for the material.
+void Material::set_densities_fet(const std::vector<std::string>& name, const std::vector<double>& density_fet)
+{
+  auto n = name.size();
+  auto m = density_fet.size();
+  auto n_coeffs = (int) m/n;
+
+  Expects(n > 0);
+  Expects(m > 0);
+  Expects(n_coeffs > 0);
+
+  if (n != nuclide_.size()) {
+    nuclide_.resize(n);
+    poly_densities_.resize(n); 
+  }
+  
+  for (gsl::index i = 0; i < n; ++i) {
+    const auto& nuc {name[i]};
+    // Check that nuclide is found in nuclide map.
+    if (data::nuclide_map.find(nuc) == data::nuclide_map.end()) {
+      int err = openmc_load_nuclide(nuc.c_str(), nullptr, 0);
+      if (err < 0) throw std::runtime_error{openmc_err_msg};
+    }
+    nuclide_[i] = data::nuclide_map.at(nuc);
+	  poly_densities_[i].coeffs_.resize(n_coeffs);
+    for (int j = 0; j < n_coeffs; j++) {
+      poly_densities_[i].coeffs_[j] = density_fet[i * n_coeffs + j];  
+    }
+  }
+}
+
+// CVMT: Set all FEs in one go.
+void Material::set_all_fet(const std::vector<std::string>& names, const std::vector<double>& densities, const std::vector<std::string>& types, 
+  const std::vector<double>& orders, const std::vector<double>& radii, const std::vector<double>& xs, 
+  const std::vector<double>& ys, const std::vector<double>& coeffs) 
+{
+  // Confirm material validity.
+  auto n = names.size();
+  Expects(n == densities.size());
+  Expects(n == types.size());
+  Expects(n == orders.size());
+  Expects(n == radii.size());
+  Expects(n == xs.size());
+  Expects(n == ys.size());
+  // Confirm FE input validity.
+  auto m = coeffs.size();
+  auto n_coeffs_input = (int) m/n;
+  Expects(n > 0);
+  Expects(m > 0);
+  Expects(n_coeffs_input > 0);
+  auto n_coeffs = 0;
+  
+  if (n != nuclide_.size()) {
+    nuclide_.resize(n);
+    atom_density_ = xt::zeros<double>({n});
+	  poly_densities_.resize(n);
+  }
+  
+  double sum_density = 0.0;
+  for (gsl::index i = 0; i < n; ++i) {
+    const auto& nuc {names[i]};
+    if (data::nuclide_map.find(nuc) == data::nuclide_map.end()) {
+      int err = openmc_load_nuclide(nuc.c_str(), nullptr, 0);
+      if (err < 0) throw std::runtime_error{openmc_err_msg};
+    }
+    
+    nuclide_[i] = data::nuclide_map.at(nuc);
+    Expects(densities[i] > 0.0);
+    atom_density_(i) = densities[i];
+    sum_density += densities[i];
+
+	  // Process polynomial types. 
+	  poly_densities_[i].type_ = types[i]; 
+    poly_densities_[i].order_ = (int)orders[i]; 
+    poly_densities_[i].radius_ = radii[i]; 
+	  if (types[i] == "zernike") {
+      n_coeffs = (int)(orders[i] + 1)*(orders[i] + 2)/2; 
+	    // Process normalization factor.
+	    poly_densities_[i].poly_norm_.resize(n_coeffs);
+	    auto ii = 0;     
+      for (int p = 0; p <= orders[i]; ++p) {
+        for(int q = -p; q <= p; q = q + 2) {
+          if (q ==0) {
+            poly_densities_[i].poly_norm_[ii] = std::sqrt(p + 1.0);
+          } else {
+            poly_densities_[i].poly_norm_[ii] = std::sqrt(2.0 * p + 2.0);
+          }
+          ii += 1; 
+	      }
+	    }
+	  } else if (types[i] == "zernike1d") {
+      n_coeffs = (int)orders[i]/2 + 1;
+      // Process normalization factor.
+      poly_densities_[i].poly_norm_.resize(n_coeffs);	  
+      auto ii = 0;
+	    for (int p = 0; p <= orders[i]; p=p+2) {
+        poly_densities_[i].poly_norm_[ii] = std::sqrt(p + 1.0);
+	      ii += 1; 
+	    }
+	  } else if (types[i] == "legendre") {
+	    n_coeffs = (int)orders[i] + 1;
+	    poly_densities_[i].orientation_ = "z";
+	    poly_densities_[i].min_ = xs[i];
+	    poly_densities_[i].max_ = ys[i];
+	  } else if (types[i] == "legendre-x") {
+	    n_coeffs = (int)orders[i] + 1;
+	    poly_densities_[i].orientation_ = "x";
+	    poly_densities_[i].min_ = xs[i];
+	    poly_densities_[i].max_ = ys[i];
+	    poly_densities_[i].type_ = "legendre";
+	  } else if (types[i] == "legendre-y") {
+	    n_coeffs = (int)orders[i] + 1;
+	    poly_densities_[i].orientation_ = "y";
+	    poly_densities_[i].min_ = xs[i];
+	    poly_densities_[i].max_ = ys[i];
+	    poly_densities_[i].type_ = "legendre";
+	  } else if (types[i] == "legendre-z") {
+	    n_coeffs = (int)orders[i] + 1;
+	    poly_densities_[i].orientation_ = "z";
+	    poly_densities_[i].min_ = xs[i];
+	    poly_densities_[i].max_ = ys[i];
+	    poly_densities_[i].type_ = "legendre";
+	  }
+	
+    // Confirm number of input coefficients match expectations.
+	  if ((int)orders[i] != 0) {
+	    Expects(n_coeffs == n_coeffs_input);
+	  }
+
+	  // Process polynomial coefficients.
+	  poly_densities_[i].coeffs_.resize(n_coeffs);
+	  for (int j = 0; j < n_coeffs; j++) {
+      poly_densities_[i].coeffs_[j] = coeffs[i * n_coeffs_input + j];  
+    }
+
+	  // Process FE offsets.
+	  poly_densities_[i].n_coeffs_ = n_coeffs;
+    poly_densities_[i].center_offset_[0] = xs[i];
+	  poly_densities_[i].center_offset_[1] = ys[i];
+  }
+
+  // Set total density to the sum of the vector
+  this->set_density(sum_density, "atom/b-cm");
+
+  // Assign S(a,b) tables
+  this->init_thermal();
+
+  // Set CVMT flag.
+  continuous_num_density_ = true;
+}	
 
 double Material::volume() const
 {
@@ -1493,6 +1773,95 @@ extern "C" int openmc_material_set_densities(
   return 0;
 }
 
+// CVMT: C functions.
+extern "C" int openmc_material_set_fet(
+  int32_t index, const char* name, int order, double radius)
+{
+  if (index >= 0 && index < model::materials.size()) {
+    try {
+      model::materials[index]->set_fet(name, order, radius);
+    } catch (const std::exception& e) {
+      set_errmsg(e.what());
+      return OPENMC_E_UNASSIGNED;
+    }
+  } else {
+    set_errmsg("Index in materials array is out of bounds.");
+    return OPENMC_E_OUT_OF_BOUNDS;
+  }
+  return 0;
+}
+
+extern "C" int openmc_material_set_offsets_fet(
+  int32_t index, int n, const double* xx, const double* yy)
+{
+  if (index >= 0 && index < model::materials.size()) {
+    try {
+      model::materials[index]->set_offsets_fet({xx, xx + n}, {yy, yy + n});
+    } catch (const std::exception& e) {
+      set_errmsg(e.what());
+      return OPENMC_E_UNASSIGNED;
+    }
+  } else {
+    set_errmsg("Index in materials array is out of bounds.");
+    return OPENMC_E_OUT_OF_BOUNDS;
+  }
+  return 0;
+}
+
+extern "C" int openmc_material_disable_fet(
+  int32_t index)
+{
+  if (index >= 0 && index < model::materials.size()) {
+    try {
+      model::materials[index]->disable_fet();
+    } catch (const std::exception& e) {
+      set_errmsg(e.what());
+      return OPENMC_E_UNASSIGNED;
+    }
+  } else {
+    set_errmsg("Index in materials array is out of bounds.");
+    return OPENMC_E_OUT_OF_BOUNDS;
+  }
+  return 0;
+}
+
+extern "C" int openmc_material_set_densities_fet(
+  int32_t index, int n, int m, const char** name, const double* density_fet)
+{
+  if (index >= 0 && index < model::materials.size()) {
+    try {
+      model::materials[index]->set_densities_fet({name, name + n},{density_fet, density_fet + m});
+    } catch (const std::exception& e) {
+      set_errmsg(e.what());
+      return OPENMC_E_UNASSIGNED;
+    }
+  } else {
+    set_errmsg("Index in materials array is out of bounds.");
+    return OPENMC_E_OUT_OF_BOUNDS;
+  }
+  return 0;
+}
+
+extern "C" int openmc_material_set_all_fet(
+  int32_t index, int n, int m, const char** names, const double* densities, const char** types,
+  const double* orders,const double* radii,const double* xs,const double* ys,const double* coeffs)
+{
+  if (index >= 0 && index < model::materials.size()) {
+    try {
+	  model::materials[index]->set_all_fet({
+      names, names + n},{densities, densities + n},{types, types + n},{orders, orders + n},{radii, radii + n},
+      {xs, xs + n},{ys, ys + n},{coeffs, coeffs + m});
+    } catch (const std::exception& e) {
+      set_errmsg(e.what());
+      return OPENMC_E_UNASSIGNED;
+    }
+  } else {
+    set_errmsg("Index in materials array is out of bounds.");
+    return OPENMC_E_OUT_OF_BOUNDS;
+  }
+  return 0;
+}
+
 extern "C" int openmc_material_set_id(int32_t index, int32_t id)
 {
   if (index >= 0 && index < model::materials.size()) {
@@ -1566,6 +1935,321 @@ extern "C" int openmc_extend_materials(
 extern "C" size_t n_materials()
 {
   return model::materials.size();
+}
+
+// CVMT: PolyProperty functions. 
+// Evaluate polynomial at particle position.
+double PolyProperty::evaluate(Position r) const {
+  double results {0.0}; 
+  // 2D mode. 
+  if(type_ == "zernike1d"){ 
+    results = evaluate_zernike1d(r);
+  } else if (type_ == "zernike"){
+    results = evaluate_zernike(r);
+  } else if (type_ == "legendre") {
+    results = evaluate_legendre(r);
+  } else if (type_ == "legendre2d") {
+    results = evaluate_legendre2d(r);
+  }  
+  // 3D mode.
+  if (axial_){
+    results *= evaluate_legendre_axial(r);
+  }
+  return results;
+}
+
+double PolyProperty::evaluate_zernike1d(Position r) const {
+  int i, k;
+  double rho {0.0};
+  std::vector<double> poly_val;
+  double property {0.0};
+  if (order_ == 0) return coeffs_[0];
+  // allocate array
+  poly_val.resize(n_coeffs_);
+  //  Get normalized positions
+  auto offset_x = r.x - center_offset_[0];
+  auto offset_y = r.y - center_offset_[1];
+  rho = std::sqrt(offset_x * offset_x + offset_y * offset_y) / radius_;
+  calc_zn_rad(order_, rho, poly_val.data());
+  k = 2;
+  for( i=0; i <= order_; i=i+2){
+    property += poly_val[k-2] * coeffs_[k-2] * poly_norm_[k-2];
+    k = k + 1;
+  }
+  if (property < -1.0E-8) {
+	  property = coeffs_[0]; // Negative value is forced to the zeroth moment.
+  } else if (property < 0.0) {
+    // Potential catch here.
+  }
+  return property;
+}
+
+double PolyProperty::evaluate_zernike(Position r) const {
+  int i, j, k;
+  double rho {0.0};
+  double phi {0.0};
+  double property {0.0}; 
+  std::vector<double> poly_results;
+  if (order_ == 0) return coeffs_[0];
+  //! allocate array
+  poly_results.resize(n_coeffs_);
+  //! Get normalized positions
+  auto offset_x = r.x - center_offset_[0];
+  auto offset_y = r.y - center_offset_[1];
+  rho = std::sqrt(offset_x * offset_x + offset_y * offset_y)/radius_;
+  phi = std::atan2(offset_y, offset_x);
+  calc_zn(order_, rho, phi, poly_results.data());
+  //! Keeps tracking of index in coeffs_
+  k = 2; 
+  for( i=0; i<=order_; i++){
+    for( j=1; j<=i+1; j++){
+      // property += poly_results[k-2] * coeffs_[k-2] * poly_norm_[k-2];
+      property += poly_results[k-2] * coeffs_[k-2];
+      k += 1;
+    }
+  }
+  if (property < -1.0E-8) {
+	  property = coeffs_[0]; // negative value is forced to average value 
+  } else if (property < 0.0) {
+    //printf("Warning: A negative number density between -1E-8 and 0 was calculated\n");
+  }
+  return property;
+}
+
+double PolyProperty::evaluate_legendre(Position r) const {
+  double rho {0.0};
+  double property {0.0}; 
+  std::vector<double> poly_results;
+  if (order_ == 0) return coeffs_[0];
+  //! allocate array
+  poly_results.resize(n_coeffs_);
+  // get normalized postion in z direction
+  if (orientation_ == "x") {
+	  rho = 2.0 * (r.x - min_) / (max_ - min_) - 1.0;
+  } else if (orientation_ == "y") {
+	  rho = 2.0 * (r.y - min_) / (max_ - min_) - 1.0;
+  } else if (orientation_ == "z") {
+	  rho = 2.0 * (r.z - min_) / (max_ - min_) - 1.0;
+  }
+  // calculate polynomial terms 
+  calc_pn_c(order_, rho, poly_results.data());
+  for (int p = 0; p <= order_; p++) {
+    //property += poly_results[p] * coeffs_[p] * poly_norm_[p]; 
+	  property += poly_results[p] * coeffs_[p]; // to be determined, (p+0.5) already in calc_pn_c 
+	  // if (p+0.5) applied above, when rho = 0.9, negative result will be obtained.
+  }
+  if (property < -1.0E-8) {
+	  property = coeffs_[0]; // negative value is forced to average value 
+  } else if (property < 0.0) {
+    //
+  }
+  return property;
+}
+
+double PolyProperty::evaluate_legendre2d(Position r) const {
+  double rho1=0.0, rho2=0.0;
+  double res1=0.0, res2=0.0; 
+  std::vector<double> poly_1, poly_2;
+  if (order_ == 0) return coeffs_[0] * coeffs_[n_coeffs_/2];
+  //! allocate array
+  poly_1.resize(order_ + 1);
+  poly_2.resize(order_ + 1);
+  // get normalized postion in z direction
+  if (orientation_ == "xy") {
+    rho1 = 2.0 * (r.x - min_2d_[0]) / (max_2d_[0] - min_2d_[0]) - 1.0;
+    rho2 = 2.0 * (r.y - min_2d_[1]) / (max_2d_[1] - min_2d_[1]) - 1.0;
+  } else if (orientation_ == "yz") {
+    rho1 = 2.0 * (r.y - min_2d_[0]) / (max_2d_[0] - min_2d_[0]) - 1.0;
+    rho2 = 2.0 * (r.z - min_2d_[1]) / (max_2d_[1] - min_2d_[1]) - 1.0;
+  } else if (orientation_ == "xz") {
+    rho1 = 2.0 * (r.x - min_2d_[0]) / (max_2d_[0] - min_2d_[0]) - 1.0;
+    rho2 = 2.0 * (r.z - min_2d_[1]) / (max_2d_[1] - min_2d_[1]) - 1.0;
+  }
+  // calculate polynomial terms 
+  calc_pn_c(order_, rho1, poly_1.data());
+  calc_pn_c(order_, rho2, poly_2.data());
+  for (int p = 0; p <= order_; p++) {
+    res1 += poly_1[p] * coeffs_[p];
+    res2 += poly_2[p] * coeffs_[n_coeffs_/2+p];	
+    // to be determined, (p+0.5) already in calc_pn_c 
+  } 
+  auto property = res1 * res2;
+  if (property < -1.0E-8) {
+    warning("A negative number density below -1E-8 was calculated in legendre2d.\n");
+	  std::cout<<"r.x="<<r.x<<" r.y="<<r.y<<" res1="<<res1<<" res2="<<res2<<std::endl;
+	  property = std::fabs(property);
+  } else if (property < 0.0) {
+    //
+  }
+  return property;
+}
+
+double PolyProperty::evaluate_legendre_axial(Position r) const {
+  double rho {0.0};
+  double property {0.0}; 
+  std::vector<double> poly_results;
+  //! allocate array
+  poly_results.resize(n_coeffs_axial_);
+  // get normalized postion in z direction
+  rho = 2.0 * (r.z - axial_offset_[0]) / (axial_offset_[1] - axial_offset_[0]) - 1.0;
+  calc_pn_c(order_axial_, rho, poly_results.data());
+  for (int p = 0; p <= order_axial_; p++) {
+    //property += (p + 0.5) * poly_results[p] * coeffs_axial_[p]; // normalization factor applied
+	  property += poly_results[p] * coeffs_axial_[p]; // to be determined, (l+0.5) already in calc_pn_c 
+	  // if (p+0.5) applied above, when rho = 0.9, negative result will be obtained.
+  }
+  //  
+  if (property < -1.0E-8) {
+     fatal_error("A negative number density below -1E-8 was calculated in axial legendre.\n");
+  } else if (property < 0.0) {
+    //
+  }
+  return property;
+}
+
+PolyProperty::PolyProperty(){
+  // Constructor 
+}
+
+void PolyProperty::set_order(std::string type, int order){
+  // different type of legendre
+  if (type == "legendre-x") {
+    type_ = "legendre";
+	  orientation_ = "x";
+  } else if (type == "legendre-y") {
+    type_ = "legendre";
+	  orientation_ = "y";
+  } else if (type == "legendre-z") {
+    type_ = "legendre";
+	  orientation_ = "z";
+  } else if (type == "legendre-xy") {
+    type_ = "legendre2d";
+	  orientation_ = "xy";
+  } else if (type == "legendre-yz") {
+    type_ = "legendre2d";
+	  orientation_ = "yz";
+  } else if (type == "legendre-xz") {
+    type_ = "legendre2d";
+	  orientation_ = "xz";
+  }
+  else if (type == "zernike" || type == "zernike1d") {
+	  type_ = type;
+  }
+  // set order of polynomial and size of coefficients array
+  order_ = order;
+  if (type_ == "zernike1d") {
+    n_coeffs_ = order / 2 + 1;
+  } else if (type_ == "zernike") {
+    n_coeffs_ = (order + 1)*(order + 2) / 2;
+  } else if (type_ == "legendre") {
+    n_coeffs_  = order_ + 1;
+  } else if (type_ == "legendre2d") {
+    n_coeffs_  = 2 * (order_ + 1);
+  }
+  coeffs_.resize(n_coeffs_);
+  poly_norm_.resize(n_coeffs_);
+}
+
+
+void PolyProperty::set_coeffs(double coeffs[]){
+  // copy coefficients from input file 
+  if (type_ == "zernike" || type_ == "zernike1d") {
+    // offset 
+	  center_offset_[0] = coeffs[0];
+	  center_offset_[1] = coeffs[1];
+	  // radius
+	  radius_ = coeffs[2];
+	  // coefficients
+	  for (int i=0; i<n_coeffs_; i++){
+      auto n_skip = 3;
+	    coeffs_[i] = coeffs[i+n_skip];
+    }
+  } else if (type_ == "legendre") {
+    // offset 
+	  min_ = coeffs[0];
+	  max_ = coeffs[1];
+	  // coefficients
+	  for (int i=0; i<n_coeffs_; i++){
+      auto n_skip = 2;
+	    coeffs_[i] = coeffs[i+n_skip];
+    }
+  } else if (type_ == "legendre2d") {
+    // offset 
+    min_2d_[0] = coeffs[0];
+	  max_2d_[0] = coeffs[1];
+	  min_2d_[1] = coeffs[2];
+	  max_2d_[1] = coeffs[3];
+	  // coefficients 
+	  for (int i=0; i<n_coeffs_; i++){
+      auto n_skip = 4;
+	    coeffs_[i] = coeffs[i+n_skip];
+    }
+  }
+}
+
+void PolyProperty::apply_normalization(){
+  if(type_ == "zernike1d") {
+    int ii = 1;
+    for(int p=0; p<=order_+1; p=p+2){
+      poly_norm_[ii-1] = std::sqrt(p+1);
+      ii = ii + 1;
+    }
+  } else if(type_ == "zernike") {
+    int ii = 1;
+    for(int p=0; p<=order_; p=p+1){
+      for(int q=-p; q<=p; q=q+2) {
+        if(q==0) {
+          poly_norm_[ii-1] = std::sqrt(p + 1.0);
+        } else {
+          poly_norm_[ii-1] = std::sqrt(2.0 * p + 2.0);
+        }
+        ii = ii + 1;
+      }
+    }
+  } else if (type_ == "legendre") {
+    for(int p=0; p<=order_; p=p+1) {
+	  poly_norm_[p] = p + 0.5; // (2n+1)/2
+	}
+  } else if (type_ == "legendre2d") {
+    for(int p=0; p<=order_; p=p+1) {
+      // first half
+	  poly_norm_[p] = p + 0.5; 
+	  // second half
+	  poly_norm_[p+order_+1] = p + 0.5; 
+	}
+  }
+}
+
+void PolyProperty::set_order_axial(int order){
+  order_axial_ = order;
+  n_coeffs_axial_ = order + 1;
+  coeffs_axial_.resize(n_coeffs_axial_);
+  poly_norm_axial_.resize(n_coeffs_axial_);
+}
+
+void PolyProperty::set_coeffs_axial(double coeffs_axial[]){
+  for (int i=0; i<n_coeffs_axial_; i++){
+    coeffs_axial_[i] = coeffs_axial[i];
+  }
+}
+
+void PolyProperty::set_axial_offset(double zmin, double zmax){
+  axial_offset_[0] = zmin;
+  axial_offset_[1] = zmax;
+}
+
+PolyProperty::~PolyProperty(){
+  // Resize the number of coefficients 
+  n_coeffs_ = 0;
+  order_ = 0;
+  coeffs_.clear();
+  poly_norm_.clear();
+  if (axial_){
+    n_coeffs_axial_ = 0;
+    order_axial_ = 0;
+    coeffs_axial_.clear();
+    poly_norm_axial_.clear();
+  }
 }
 
 } // namespace openmc

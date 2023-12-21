@@ -128,6 +128,7 @@ int trigger_batch_interval {1};
 int verbosity {7};
 double weight_cutoff {0.25};
 double weight_survive {1.0};
+int cvmt_intervals {10}; // CVMT
 
 } // namespace settings
 

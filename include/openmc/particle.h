@@ -62,6 +62,16 @@ public:
   //! \param src Source site data
   void from_source(const SourceSite* src);
 
+  // CVMT
+  double sampling_cvmt(Particle *, double);
+  void move_particle_coord(LocalCoord &coord,double ds);
+  void simpsons_path_integration(double &optical_depth, double distance, std::vector<double> &xs_t, bool dbg_file, int it_num);
+  void estimate_flight_distance(std::vector<double> xs_t, double distance, double tau_hat, double &s);
+  void get_quadratic_root(double a, double b, double c, double lower_b, double upper_b, double &root);
+  void get_cubic_root(double a, double b, double c, double d, double lower_b, double upper_b, double& root);
+  double sign(double aa, double bb);
+  void copy_data(LocalCoord &to, LocalCoord from);
+
   // Coarse-grained particle events
   void event_calculate_xs();
   void event_advance();

@@ -35,6 +35,47 @@ extern vector<unique_ptr<Material>> materials;
 //! A substance with constituent nuclides and thermal scattering data
 //==============================================================================
 
+class PolyProperty{
+public:	
+  // zernike or zernike radial polynomial used for radial distribution
+  std::string type_; //! polynomial type, 'zernike', 'zernike1d' or 'legendre' (2D mode)
+  std::vector<double> coeffs_; //! coefficients for poly evaluation
+  int n_coeffs_; //! number of coeffs
+  int order_; //! the order of the expansion
+  double radius_; //! radius of the expansion
+  double min_, max_; //! offset of legendre expansion 
+  std::string orientation_; //! orientation of legendre expansion, 'x', 'y', 'z'
+  double center_offset_[2] {0., 0.}; //! offset for the center position (x, y)
+  std::vector<double> poly_norm_; //! polynomial norm available to property for efficiency
+  // 2d legendre polynomials 
+  double min_2d_[2], max_2d_[2];
+  std::vector<std::vector<double>> coeffs_2d_;
+  // legendre polynomial used for axial distribution
+  bool axial_ {false}; //! flag that indicates if legendre polynomial is used for axial distribution (3D mode)
+  int order_axial_; //! order of legendre polynomial 
+  int n_coeffs_axial_; //! number of coefficients of legendre polynomial 
+  std::vector<double> coeffs_axial_; //! coefficients of legendre polynomial 
+  double axial_offset_[2]; //! offset for min and max of the axial coordinate (zmin, zmax)
+  std::vector<double> poly_norm_axial_; // legendre norm available to property for efficiency
+  // functions to evaluate the polynomials 
+  double evaluate(Position r) const; //! Evaluate function
+  double evaluate_zernike1d(Position r) const;
+  double evaluate_zernike(Position r) const; 
+  double evaluate_legendre(Position r) const;
+  double evaluate_legendre2d(Position r) const;
+  double evaluate_legendre_axial(Position r) const;
+  // set dimension for vectors 
+  void set_order(std::string type, int order);
+  void set_coeffs(double coeffs[]);
+  void apply_normalization();
+  void set_order_axial(int order);
+  void set_coeffs_axial(double coeffs_axial[]);
+  void set_axial_offset(double zmin, double zmax);
+  // constructor and destructor 
+  PolyProperty();
+  ~PolyProperty();
+};
+
 class Material {
 public:
   //----------------------------------------------------------------------------
@@ -89,6 +130,17 @@ public:
   //! \param[in] density Density of each nuclide in [atom/b-cm]
   void set_densities(
     const vector<std::string>& name, const vector<double>& density);
+
+  // CVMT FETs 
+  void set_fet(const std::string& fet_type, int order, double radius);
+  void set_offsets_fet(const std::vector<double>& x, const std::vector<double>& y);
+  void disable_fet();
+  void set_densities_fet(const std::vector<std::string>& name, const std::vector<double>& density_fet);
+  void set_all_fet(const std::vector<std::string>& names, const std::vector<double>& densities, const std::vector<std::string>& types, 
+	const std::vector<double>& orders, 
+	const std::vector<double>& radii, 
+	const std::vector<double>& xs, const std::vector<double>& ys,
+	const std::vector<double>& coeffs);
 
   //! Clone the material by deep-copying all members, except for the ID,
   //  which will get auto-assigned to the next available ID. After creating
@@ -178,6 +230,9 @@ public:
   bool depletable_ {false}; //!< Is the material depletable?
   vector<bool> p0_;         //!< Indicate which nuclides are to be treated with
                             //!< iso-in-lab scattering
+  // CVMT: variables data block
+  bool continuous_num_density_ {false};      //! cvmt flag: indicator the continuous materials number density
+  std::vector<PolyProperty> poly_densities_; //! store cvmt polynomial number density 
 
   // To improve performance of tallying, we store an array (direct address
   // table) that indicates for each nuclide in data::nuclides the index of the

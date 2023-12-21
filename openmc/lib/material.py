@@ -62,6 +62,28 @@ _dll.openmc_material_set_volume.restype = c_int
 _dll.openmc_material_set_volume.errcheck = _error_handler
 _dll.n_materials.argtypes = []
 _dll.n_materials.restype = c_size_t
+#CVMT FETs 
+_dll.openmc_material_set_densities_fet.argtypes = [
+    c_int32, c_int, c_int, POINTER(c_char_p), POINTER(c_double)]
+_dll.openmc_material_set_densities_fet.restype = c_int
+_dll.openmc_material_set_densities_fet.errcheck = _error_handler
+_dll.openmc_material_set_fet.argtypes = [
+    c_int32, c_char_p, c_int, c_double]
+_dll.openmc_material_set_fet.restype = c_int
+_dll.openmc_material_set_fet.errcheck = _error_handler
+_dll.openmc_material_disable_fet.argtypes = [c_int32]
+_dll.openmc_material_disable_fet.restype = c_int
+_dll.openmc_material_disable_fet.errcheck = _error_handler
+_dll.openmc_material_set_offsets_fet.argtypes = [
+    c_int32, c_int, POINTER(c_char_p), POINTER(c_double)]
+_dll.openmc_material_set_offsets_fet.restype = c_int
+_dll.openmc_material_set_offsets_fet.errcheck = _error_handler
+_dll.openmc_material_set_all_fet.argtypes = [
+    c_int32, c_int, c_int, POINTER(c_char_p), POINTER(c_double), 
+    POINTER(c_char_p), POINTER(c_double), POINTER(c_double), POINTER(c_double),
+    POINTER(c_double), POINTER(c_double)]
+_dll.openmc_material_set_all_fet.restype = c_int
+_dll.openmc_material_set_all_fet.errcheck = _error_handler
 
 
 class Material(_FortranObjectWithID):
@@ -271,6 +293,74 @@ class Material(_FortranObjectWithID):
 
         _dll.openmc_material_set_densities(self._index, len(nuclides), nucs, dp)
 
+    def set_fet(self, name, order, radius):
+        """Set FETs parameters in a material
+        """
+        name_ptr = c_char_p(name.encode())
+        _dll.openmc_material_set_fet(self._index, name_ptr, order, radius)
+
+    def disable_fet(self):
+        """Disable FETs parameters in a material
+        """
+        _dll.openmc_material_disable_fet(self._index)    
+
+    def set_densities_fet(self, nuclides, densities_fet):
+        """Set the FETs densities of a list of nuclides in a material
+        """
+        # Convert strings to an array of char*
+        nucs = (c_char_p * len(nuclides))()
+        nucs[:] = [x.encode() for x in nuclides]
+        # Get numpy array as a double*
+        d = np.asarray(densities_fet)
+        dp = d.ctypes.data_as(POINTER(c_double))
+
+        _dll.openmc_material_set_densities_fet(self._index, len(nuclides), 
+                                               len(densities_fet), nucs, dp)
+        
+    def set_offsets_fet(self, xx, yy):
+        """Set offsets of a list of nuclides in a material 
+        """  
+        # Get numpy array as a double*
+        dx = np.asarray(xx)
+        dpx = dx.ctypes.data_as(POINTER(c_double))
+        dy = np.asarray(yy)
+        dpy = dy.ctypes.data_as(POINTER(c_double))
+
+        _dll.openmc_material_set_offsets_fet(self._index, len(xs), 
+                                              dpx, dpy)
+        
+    def set_all_fet(self, nuclides, densities, 
+                     types, orders, radii, offsets_x, offsets_y, coeffs):
+        """Set all FETs parameters 
+        """
+        # Convert strings to an array of char*
+        nucs = (c_char_p * len(nuclides))()
+        nucs[:] = [x.encode() for x in nuclides]
+
+        # Get numpy array as a double*
+        d = np.asarray(densities)
+        dp = d.ctypes.data_as(POINTER(c_double))
+
+        ts = (c_char_p * len(types))()
+        ts[:] = [x.encode() for x in types]
+
+        d_o = np.asarray(orders)
+        do = d_o.ctypes.data_as(POINTER(c_double))
+
+        d_r = np.asarray(radii)
+        dr = d_r.ctypes.data_as(POINTER(c_double))
+
+        d_x = np.asarray(offsets_x)
+        dx = d_x.ctypes.data_as(POINTER(c_double))
+
+        d_y = np.asarray(offsets_y)
+        dy = d_y.ctypes.data_as(POINTER(c_double))
+
+        d_c = np.asarray(coeffs)
+        dc = d_c.ctypes.data_as(POINTER(c_double))
+
+        _dll.openmc_material_set_all_fet(self._index, len(nuclides), len(coeffs),
+                                        nucs, dp, ts, do, dr, dx, dy, dc)
 
 class _MaterialMapping(Mapping):
     def __getitem__(self, key):

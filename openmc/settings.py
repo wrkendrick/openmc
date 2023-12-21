@@ -344,6 +344,8 @@ class Settings:
         self._max_splits = None
         self._max_tracks = None
 
+        self._cvmt_intervals = None
+
         for key, value in kwargs.items():
             setattr(self, key, value)
 
@@ -996,6 +998,15 @@ class Settings:
         cv.check_type('maximum particle tracks', value, Integral)
         cv.check_greater_than('maximum particle tracks', value, 0, True)
         self._max_tracks = value
+
+    @property
+    def cvmt_intervals(self):
+        return self._cvmt_intervals
+    
+    def _create_cvmt_intervals_subelement(self, root):
+        if self._cvmt_intervals is not None:
+            elem = ET.SubElement(root, "cvmt_intervals")
+            elem.text = str(self._cvmt_intervals)
 
     @property
     def weight_windows_file(self) -> Optional[PathLike]:
@@ -1725,6 +1736,11 @@ class Settings:
         if text is not None:
             self.log_grid_bins = int(text)
 
+    def _cvmt_intervals_from_xml_element(self, root):
+        text = get_text(root, 'cvmt_intervals')
+        if text is not None:
+            self.cvmt_intervals = int(text)
+
     def _write_initial_source_from_xml_element(self, root):
         text = get_text(root, 'write_initial_source')
         if text is not None:
@@ -1828,6 +1844,7 @@ class Settings:
         self._create_weight_window_checkpoints_subelement(element)
         self._create_max_splits_subelement(element)
         self._create_max_tracks_subelement(element)
+        self._create_cvmt_intervals_subelement(element)
 
         # Clean the indentation in the file to be user-readable
         clean_indentation(element)
@@ -1925,6 +1942,7 @@ class Settings:
         settings._weight_window_checkpoints_from_xml_element(elem)
         settings._max_splits_from_xml_element(elem)
         settings._max_tracks_from_xml_element(elem)
+        settings._cvmt_intervals_subelement(elem)
 
         # TODO: Get volume calculations
         return settings

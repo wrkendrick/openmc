@@ -232,7 +232,12 @@ double score_fission_q(const Particle& p, int score_bin, const Tally& tally,
       double score {0.0};
       for (auto i = 0; i < material.nuclide_.size(); ++i) {
         auto j_nuclide = material.nuclide_[i];
-        auto atom_density = material.atom_density_(i);
+        double atom_density = 0.0;
+        if (material.continuous_num_density_ && material.poly_densities_.size()>i) {
+          atom_density = material.poly_densities_[i].evaluate(p.coord(p.n_coord()-1).r);
+        } else {
+          atom_density = material.atom_density_(i);
+        }
         const Nuclide& nuc {*data::nuclides[j_nuclide]};
         score += get_nuc_fission_q(nuc, p, score_bin) * atom_density *
                  p.neutron_xs(j_nuclide).fission;
@@ -304,7 +309,12 @@ double score_neutron_heating(const Particle& p, const Tally& tally, double flux,
       const Material& material {*model::materials[p.material()]};
       for (auto i = 0; i < material.nuclide_.size(); ++i) {
         int j_nuclide = material.nuclide_[i];
-        double atom_density {material.atom_density_(i)};
+        double atom_density = 0.0;
+        if (material.continuous_num_density_ && material.poly_densities_.size()>i) {
+          atom_density = material.poly_densities_[i].evaluate(p.coord(p.n_coord()-1).r);
+        } else {
+          atom_density = material.atom_density_(i);
+        }
         const Nuclide& nuc {*data::nuclides[j_nuclide]};
         heating_xs += atom_density *
                       get_nuclide_neutron_heating(p, nuc, rxn_bin, j_nuclide);
@@ -544,6 +554,9 @@ void score_general_ce_nonanalog(Particle& p, int i_tally, int start_index,
     case SCORE_FLUX:
       score = flux;
       break;
+    
+    case SCORE_FLUX_Z1D:
+    case SCORE_FLUX_ZN:
 
     case SCORE_TOTAL:
       if (i_nuclide >= 0) {
@@ -585,6 +598,9 @@ void score_general_ce_nonanalog(Particle& p, int i_tally, int start_index,
         }
       }
       break;
+
+    case SCORE_ABSORPTION_Z1D:
+    case SCORE_ABSORPTION_ZN:
 
     case SCORE_ABSORPTION:
       if (p.type() != Type::neutron && p.type() != Type::photon)
@@ -645,7 +661,12 @@ void score_general_ce_nonanalog(Particle& p, int i_tally, int start_index,
           const Material& material {*model::materials[p.material()]};
           for (auto i = 0; i < material.nuclide_.size(); ++i) {
             auto j_nuclide = material.nuclide_[i];
-            auto atom_density = material.atom_density_(i);
+            double atom_density = 0.0;
+            if (material.continuous_num_density_ && material.poly_densities_.size()>i) {
+              atom_density = material.poly_densities_[i].evaluate(p.coord(p.n_coord()-1).r);
+            } else {
+              atom_density = material.atom_density_(i);
+            }
             score += p.neutron_xs(j_nuclide).fission *
                      data::nuclides[j_nuclide]->nu(
                        E, ReactionProduct::EmissionMode::prompt) *
@@ -692,7 +713,12 @@ void score_general_ce_nonanalog(Particle& p, int i_tally, int start_index,
             const Material& material {*model::materials[p.material()]};
             for (auto i = 0; i < material.nuclide_.size(); ++i) {
               auto j_nuclide = material.nuclide_[i];
-              auto atom_density = material.atom_density_(i);
+              double atom_density = 0.0;
+              if (material.continuous_num_density_ && material.poly_densities_.size()>i) {
+                atom_density = material.poly_densities_[i].evaluate(p.coord(p.n_coord()-1).r);
+              } else {
+                atom_density = material.atom_density_(i);
+              }
               // Tally each delayed group bin individually
               for (auto d_bin = 0; d_bin < filt.n_bins(); ++d_bin) {
                 auto d = filt.groups()[d_bin];
@@ -712,7 +738,12 @@ void score_general_ce_nonanalog(Particle& p, int i_tally, int start_index,
             const Material& material {*model::materials[p.material()]};
             for (auto i = 0; i < material.nuclide_.size(); ++i) {
               auto j_nuclide = material.nuclide_[i];
-              auto atom_density = material.atom_density_(i);
+              double atom_density = 0.0;
+              if (material.continuous_num_density_ && material.poly_densities_.size()>i) {
+                atom_density = material.poly_densities_[i].evaluate(p.coord(p.n_coord()-1).r);
+              } else {
+                atom_density = material.atom_density_(i);
+              }
               score += p.neutron_xs(j_nuclide).fission *
                        data::nuclides[j_nuclide]->nu(
                          E, ReactionProduct::EmissionMode::delayed) *
@@ -773,7 +804,12 @@ void score_general_ce_nonanalog(Particle& p, int i_tally, int start_index,
             const Material& material {*model::materials[p.material()]};
             for (auto i = 0; i < material.nuclide_.size(); ++i) {
               auto j_nuclide = material.nuclide_[i];
-              auto atom_density = material.atom_density_(i);
+              double atom_density = 0.0;
+              if (material.continuous_num_density_ && material.poly_densities_.size()>i) {
+                atom_density = material.poly_densities_[i].evaluate(p.coord(p.n_coord()-1).r);
+              } else {
+                atom_density = material.atom_density_(i);
+              }
               const auto& nuc {*data::nuclides[j_nuclide]};
               if (nuc.fissionable_) {
                 const auto& rxn {*nuc.fission_rx_[0]};
@@ -798,7 +834,12 @@ void score_general_ce_nonanalog(Particle& p, int i_tally, int start_index,
             const Material& material {*model::materials[p.material()]};
             for (auto i = 0; i < material.nuclide_.size(); ++i) {
               auto j_nuclide = material.nuclide_[i];
-              auto atom_density = material.atom_density_(i);
+              double atom_density = 0.0;
+              if (material.continuous_num_density_ && material.poly_densities_.size()>i) {
+                atom_density = material.poly_densities_[i].evaluate(p.coord(p.n_coord()-1).r);
+              } else {
+                atom_density = material.atom_density_(i);
+              }
               const auto& nuc {*data::nuclides[j_nuclide]};
               if (nuc.fissionable_) {
                 const auto& rxn {*nuc.fission_rx_[0]};
@@ -842,7 +883,12 @@ void score_general_ce_nonanalog(Particle& p, int i_tally, int start_index,
         const Material& material {*model::materials[p.material()]};
         for (auto i = 0; i < material.nuclide_.size(); ++i) {
           auto j_nuclide = material.nuclide_[i];
-          auto atom_density = material.atom_density_(i);
+          double atom_density = 0.0;
+          if (material.continuous_num_density_ && material.poly_densities_.size()>i) {
+            atom_density = material.poly_densities_[i].evaluate(p.coord(p.n_coord()-1).r);
+          } else {
+            atom_density = material.atom_density_(i);
+          }
           const auto& nuc {*data::nuclides[j_nuclide]};
           if (nuc.fissionable_) {
             const auto& rxn {*nuc.fission_rx_[0]};
@@ -873,7 +919,12 @@ void score_general_ce_nonanalog(Particle& p, int i_tally, int start_index,
           const Material& material {*model::materials[p.material()]};
           for (auto i = 0; i < material.nuclide_.size(); ++i) {
             auto j_nuclide = material.nuclide_[i];
-            auto atom_density = material.atom_density_(i);
+            double atom_density = 0.0;
+            if (material.continuous_num_density_ && material.poly_densities_.size()>i) {
+              atom_density = material.poly_densities_[i].evaluate(p.coord(p.n_coord()-1).r);
+            } else {
+              atom_density = material.atom_density_(i);
+            }
             if (p.neutron_xs(j_nuclide).elastic == CACHE_INVALID)
               data::nuclides[j_nuclide]->calculate_elastic_xs(p);
             score += p.neutron_xs(j_nuclide).elastic * atom_density * flux;
@@ -924,7 +975,12 @@ void score_general_ce_nonanalog(Particle& p, int i_tally, int start_index,
           const Material& material {*model::materials[p.material()]};
           for (auto i = 0; i < material.nuclide_.size(); ++i) {
             auto j_nuclide = material.nuclide_[i];
-            auto atom_density = material.atom_density_(i);
+            double atom_density = 0.0;
+            if (material.continuous_num_density_ && material.poly_densities_.size()>i) {
+              atom_density = material.poly_densities_[i].evaluate(p.coord(p.n_coord()-1).r);
+            } else {
+              atom_density = material.atom_density_(i);
+            }
             score += p.neutron_xs(j_nuclide).reaction[m] * atom_density * flux;
           }
         }
@@ -998,7 +1054,12 @@ void score_general_ce_nonanalog(Particle& p, int i_tally, int start_index,
         const Material& material {*model::materials[p.material()]};
         for (auto i = 0; i < material.nuclide_.size(); ++i) {
           auto j_nuclide = material.nuclide_[i];
-          auto atom_density = material.atom_density_(i);
+          double atom_density = 0.0;
+          if (material.continuous_num_density_ && material.poly_densities_.size()>i) {
+            atom_density = material.poly_densities_[i].evaluate(p.coord(p.n_coord()-1).r);
+          } else {
+            atom_density = material.atom_density_(i);
+          }
           score +=
             get_nuclide_xs(p, j_nuclide, score_bin) * atom_density * flux;
         }
@@ -1058,6 +1119,9 @@ void score_general_ce_analog(Particle& p, int i_tally, int start_index,
       }
       break;
 
+    case SCORE_FLUX_Z1D:
+    case SCORE_FLUX_ZN:
+
     case SCORE_TOTAL:
       // All events will score to the total reaction rate. We can just use
       // use the weight of the particle entering the collision as the score
@@ -1110,6 +1174,9 @@ void score_general_ce_analog(Particle& p, int i_tally, int start_index,
         score *= (*rxn.products_[0].yield_)(E);
       }
       break;
+
+    case SCORE_ABSORPTION_Z1D:
+    case SCORE_ABSORPTION_ZN:
 
     case SCORE_ABSORPTION:
       if (p.type() != Type::neutron && p.type() != Type::photon)
@@ -2317,7 +2384,11 @@ void score_analog_tally_mg(Particle& p)
             model::materials[p.material()]->mat_nuclide_index_[i_nuclide];
           if (j == C_NONE)
             continue;
-          atom_density = model::materials[p.material()]->atom_density_(j);
+          if (model::materials[p.material()]->continuous_num_density_ && model::materials[p.material()]->poly_densities_.size()>j) {
+            atom_density = model::materials[p.material()]->poly_densities_[j].evaluate(p.coord(p.n_coord()-1).r);
+          } else {
+            atom_density = model::materials[p.material()]->atom_density_(j);
+          }
         }
 
         score_general_mg(p, i_tally, i * tally.scores_.size(), filter_index,
@@ -2385,8 +2456,11 @@ void score_tracklength_tally(Particle& p, double distance)
                 atom_density = 1.0;
               }
             } else {
-              atom_density =
-                tally.multiply_density() ? mat->atom_density_(j) : 1.0;
+              if (mat->continuous_num_density_ && mat->poly_densities_.size()>j) {
+                atom_density = tally.multiply_density() ? mat->poly_densities_[j].evaluate(p.coord(p.n_coord()-1).r) : 1.0;
+              } else {
+                atom_density = tally.multiply_density() ? mat->atom_density_(j) : 1.0;
+              } 
             }
           }
         }
@@ -2464,8 +2538,11 @@ void score_collision_tally(Particle& p)
               atom_density = 1.0;
             }
           } else {
-            atom_density =
-              tally.multiply_density() ? mat->atom_density_(j) : 1.0;
+            if (mat->continuous_num_density_ && mat->poly_densities_.size()>j) {
+              atom_density = tally.multiply_density() ? mat->poly_densities_[j].evaluate(p.coord(p.n_coord()-1).r) : 1.0;
+            } else {
+              atom_density = tally.multiply_density() ? mat->atom_density_(j) : 1.0;
+            }
           }
         }
 

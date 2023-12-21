@@ -485,7 +485,12 @@ int sample_nuclide(Particle& p)
   for (int i = 0; i < n; ++i) {
     // Get atom density
     int i_nuclide = mat->nuclide_[i];
-    double atom_density = mat->atom_density_[i];
+    double atom_density = 0.0;
+    if (mat->continuous_num_density_ && mat->poly_densities_.size()>i) {
+      atom_density = mat->poly_densities_[i].evaluate(p.coord(p.n_coord()-1).r);
+    } else {
+      atom_density = mat->atom_density_[i];
+    }
 
     // Increment probability to compare to cutoff
     prob += atom_density * p.neutron_xs(i_nuclide).total;

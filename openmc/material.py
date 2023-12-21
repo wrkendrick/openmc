@@ -20,6 +20,7 @@ from ._xml import clean_indentation, reorder_attributes
 from .mixin import IDManagerMixin
 from openmc.checkvalue import PathLike
 from openmc.stats import Univariate, Discrete, Mixture
+from openmc.zernike import *
 
 
 # Units for density supported by OpenMC
@@ -27,7 +28,7 @@ DENSITY_UNITS = ('g/cm3', 'g/cc', 'kg/m3', 'atom/b-cm', 'atom/cm3', 'sum',
                  'macro')
 
 
-NuclideTuple = namedtuple('NuclideTuple', ['name', 'percent', 'percent_type'])
+NuclideTuple = namedtuple('NuclideTuple', ['name', 'percent', 'percent_type', 'FEs'])
 
 
 class Material(IDManagerMixin):
@@ -118,7 +119,12 @@ class Material(IDManagerMixin):
         self._isotropic = []
         self._ncrystal_cfg = None
 
-        # A list of tuples (nuclide, percent, percent type)
+        # Functional Expansion attributes
+        self._zernike_order = None
+        self._zernike_type = None
+        self._legendre_order = None
+        
+        # A list of tuples (nuclide, percent, percent type, poly_zernike)
         self._nuclides = []
 
         # The single instance of Macroscopic data present in this material
@@ -133,6 +139,14 @@ class Material(IDManagerMixin):
         string += '{: <16}=\t{}\n'.format('\tID', self._id)
         string += '{: <16}=\t{}\n'.format('\tName', self._name)
         string += '{: <16}=\t{}\n'.format('\tTemperature', self._temperature)
+
+        #FETs 
+        if self._zernike_order is not None:
+            string += '{: <16}=\t{}\n'.format('\tZernike_order', self._zernike_order)
+        if self._zernike_type is not None:
+            string += '{: <16}=\t{}\n'.format('\tZernike_type', self._zernike_type)
+        if self._legendre_order is not None:
+            string += '{: <16}=\t{}\n'.format('\tLegendre_order', self._legendre_order)
 
         string += '{: <16}=\t{}'.format('\tDensity', self._density)
         string += f' [{self._density_units}]\n'
@@ -150,9 +164,16 @@ class Material(IDManagerMixin):
 
         string += '{: <16}\n'.format('\tNuclides')
 
-        for nuclide, percent, percent_type in self._nuclides:
+        for nuclide, percent, percent_type, *tmp_args in self._nuclides:
             string += '{: <16}'.format('\t{}'.format(nuclide))
             string += '=\t{: <12} [{}]\n'.format(percent, percent_type)
+            if len(tmp_args) > 0: # cvmt FETs zernike, zernikeld, legendre
+                string += '\t{: <14} =\t [{}]\n'.format('poly_coeffs', \
+                          ' '.join([str(c) for c in tmp_args[0]]))               
+                string += '\t{: <14} =\t [{}]\n'.format('poly_type', tmp_args[1])       
+            if len(tmp_args) > 2: # cvmt FETs axial coeffts
+                string += '\t{: <14} =\t [{}]\n'.format('axial_coeffs', \
+                          ' '.join([str(c) for c in tmp_args[2]]))
 
         if self._macroscopic is not None:
             string += '{: <16}\n'.format('\tMacroscopic Data')
@@ -266,12 +287,37 @@ class Material(IDManagerMixin):
         if self.volume is None:
             raise ValueError("Volume must be set in order to determine mass.")
         density = 0.0
-        for nuc, atoms_per_bcm in self.get_nuclide_atom_densities().items():
+        for nuc, atoms_per_bcm, *temp_args in self.get_nuclide_atom_densities().items():
             Z = openmc.data.zam(nuc)[0]
             if Z >= 90:
                 density += 1e24 * atoms_per_bcm * openmc.data.atomic_mass(nuc) \
                            / openmc.data.AVOGADRO
         return density*self.volume
+    
+    # FETs 
+    @property
+    def zernike_order(self):
+        return self._zernike_order
+
+    @property
+    def zernike_type(self):
+        return self._zernike_type
+
+    @property    
+    def legendre_order(self):
+        return self._legendre_order
+
+    @zernike_order.setter
+    def zernike_order(self, order):
+        self._zernike_order = order
+
+    @zernike_type.setter
+    def zernike_type(self, type):
+        self._zernike_type = type
+
+    @legendre_order.setter
+    def legendre_order(self, order):
+        self._legendre_order = order
 
     @property
     def decay_photon_energy(self) -> Optional[Univariate]:
@@ -504,7 +550,10 @@ class Material(IDManagerMixin):
                           density, Real)
             self._density = density
 
-    def add_nuclide(self, nuclide: str, percent: float, percent_type: str = 'ao'):
+    def add_nuclide(self, nuclide: str, percent: float, percent_type: str = 'ao', 
+                    poly=None, zernike=None, zernike1d=None, poly_coeffs=None,
+                    legendre=None, legendre_x=None, legendre_y=None, 
+                    legendre_z=None, legendre_xy=None, legendre_yz=None, legendre_xz=None):
         """Add a nuclide to the material
 
         Parameters
@@ -515,6 +564,8 @@ class Material(IDManagerMixin):
             Atom or weight percent
         percent_type : {'ao', 'wo'}
             'ao' for atom percent and 'wo' for weight percent
+        poly: {'poly_type', 'fet_order', 'fet_norm', 'enable'}
+            FETs in number density 
 
         """
         cv.check_type('nuclide', nuclide, str)
@@ -539,7 +590,93 @@ class Material(IDManagerMixin):
             if Z >= 89:
                 self.depletable = True
 
-        self._nuclides.append(NuclideTuple(nuclide, percent, percent_type))
+        #self._nuclides.append(NuclideTuple(nuclide, percent, percent_type))
+        if poly is not None:
+            if poly['enable'] == True:
+                order  = poly['fet_order']
+                radius = poly['fet_norm'] 
+                if(poly['poly_type']=='zernike'):
+                    n      = num_poly(order)
+                    coeffs = np.zeros(n)
+                    poly_coeffs = np.zeros(n+1)
+                    zp = ZernikePolynomial(order, coeffs, radial_norm=radius, sqrt_normed=False)
+                elif(poly['poly_type']=='zernike1d'):
+                    n      = num_poly1d(order)
+                    coeffs = np.zeros(n)
+                    poly_coeffs = np.zeros(n+1)
+                    zp = Zernike1DPolynomial(order, coeffs, radial_norm=radius)               
+                #  
+                poly_coeffs[0]  = radius
+                poly_coeffs[1:] = zp.coeffs 
+                poly_type       = poly['poly_type']
+                self._nuclides.append(NuclideTuple(nuclide, percent, percent_type, [poly_coeffs, poly_type]))
+            else:
+                self._nuclides.append(NuclideTuple(nuclide, percent, percent_type, []))
+        elif zernike is not None:
+            poly_type = 'zernike'
+            if legendre is not None:
+                self._nuclides.append(NuclideTuple(nuclide, percent, percent_type, [zernike, poly_type, legendre]))
+            else:
+                self._nuclides.append(NuclideTuple(nuclide, percent, percent_type, [zernike, poly_type]))  
+        elif zernike1d is not None:
+            poly_type = 'zernike1d'
+            if legendre is not None:
+                self._nuclides.append(NuclideTuple(nuclide, percent, percent_type, [zernike1d, poly_type, legendre]))
+            else:
+                self._nuclides.append(NuclideTuple(nuclide, percent, percent_type, [zernike1d, poly_type]))
+        elif legendre_x is not None:
+            poly_type = 'legendre-x'
+            if legendre is not None:
+                self._nuclides.append(NuclideTuple(nuclide, percent, percent_type, [legendre_x, poly_type, legendre]))
+            else:
+                self._nuclides.append(NuclideTuple(nuclide, percent, percent_type, [legendre_x, poly_type]))
+        elif legendre_y is not None:
+            poly_type = 'legendre-y'
+            if legendre is not None:
+                self._nuclides.append(NuclideTuple(nuclide, percent, percent_type, [legendre_y, poly_type, legendre]))
+            else:
+                self._nuclides.append(NuclideTuple(nuclide, percent, percent_type, [legendre_y, poly_type]))
+        elif legendre_z is not None:
+            poly_type = 'legendre-z'
+            if legendre is not None:
+                self._nuclides.append(NuclideTuple(nuclide, percent, percent_type, [legendre_z, poly_type, legendre]))
+            else:
+                self._nuclides.append(NuclideTuple(nuclide, percent, percent_type, [legendre_z, poly_type]))
+        elif legendre_xy is not None:
+            poly_type = 'legendre-xy'
+            if legendre is not None:
+                self._nuclides.append(NuclideTuple(nuclide, percent, percent_type, [legendre_xy, poly_type, legendre]))
+            else:
+                self._nuclides.append(NuclideTuple(nuclide, percent, percent_type, [legendre_xy, poly_type]))
+        elif legendre_yz is not None:
+            poly_type = 'legendre-yz'
+            if legendre is not None:
+                self._nuclides.append(NuclideTuple(nuclide, percent, percent_type, [legendre_yz, poly_type, legendre]))
+            else:
+                self._nuclides.append(NuclideTuple(nuclide, percent, percent_type, [legendre_yz, poly_type]))
+        elif legendre_xz is not None:
+            poly_type = 'legendre-xz'
+            if legendre is not None:
+                self._nuclides.append(NuclideTuple(nuclide, percent, percent_type, [legendre_xz, poly_type, legendre]))
+            else:
+                self._nuclides.append(NuclideTuple(nuclide, percent, percent_type, [legendre_xz, poly_type]))
+        else:
+            self._nuclides.append(NuclideTuple(nuclide, percent, percent_type, []))
+
+        # FETs
+        if poly_coeffs is not None:
+            self._nuclides.append(NuclideTuple(nuclide, percent, percent_type, [poly_coeffs]))
+
+    def find_nuclide(self, nuclide):
+        """ Find the location of the nuclide in material
+            If none return -1
+        """        
+        cv.check_type('nuclide', nuclide, str)
+        for loc_nuc in range(len(self._nuclides)):
+            nuc = self._nuclides[loc_nuc]
+            if nuclide == nuc[0]:
+                return loc_nuc
+        return -1 
 
     def add_components(self, components: dict, percent_type: str = 'ao'):
         """ Add multiple elements or nuclides to a material
@@ -1038,11 +1175,13 @@ class Material(IDManagerMixin):
         nucs = []
         nuc_densities = []
         nuc_density_types = []
+        nuc_FEs = []
 
         for nuc in self.nuclides:
             nucs.append(nuc.name)
             nuc_densities.append(nuc.percent)
             nuc_density_types.append(nuc.percent_type)
+            nuc_FEs.append(nuc.FEs)
 
         nucs = np.array(nucs)
         nuc_densities = np.array(nuc_densities)
@@ -1075,7 +1214,10 @@ class Material(IDManagerMixin):
         nuclides = {}
         for n, nuc in enumerate(nucs):
             if nuclide is None or nuclide == nuc:
-                nuclides[nuc] = nuc_densities[n]
+                if n<len(nuc_FEs):
+                    nuclides[nuc] = (nuc_densities[n], nuc_FEs[n])
+                else:
+                    nuclides[nuc] = nuc_densities[n]
 
         return nuclides
 
@@ -1303,6 +1445,13 @@ class Material(IDManagerMixin):
             xml_element.set("ao", str(nuclide.percent))
         else:
             xml_element.set("wo", str(nuclide.percent))
+        if len(nuclide.FEs) > 0:
+                #print(nuclide[3])
+                tmp_list = nuclide[3]
+                xml_element.set("poly_coeffs", ' '.join([str(c) for c in nuclide.FEs[0]])) 
+                xml_element.set("poly_type", nuclide.FEs[1])
+        if len(nuclide.FEs) > 2:
+                xml_element.set("axial_coeffs", ' '.join([str(c) for c in nuclide.FEs[2]]))
 
         return xml_element
 
@@ -1537,6 +1686,35 @@ class Material(IDManagerMixin):
                 mat.add_nuclide(name, float(nuclide.attrib['ao']))
             elif 'wo' in nuclide.attrib:
                 mat.add_nuclide(name, float(nuclide.attrib['wo']), 'wo')
+
+        # FETs 
+        for nuclide in elem.findall('nuclide'):
+            if 'poly_coeffs' in nuclide.attrib:
+                coeffs = nuclide.attrib['poly_coeffs']
+                coeffs = coeffs.split(' ')
+                fet_type = nuclide.attrib['poly_type']
+                radius = coeffs[2] # skip offset values in zernike or zernike1d
+                m = len(coeffs) - 1
+                order = 0
+                offset = OrderedDict()
+                offset[mat_id] = (coeffs[0], coeffs[1]) # offset values 
+                if fet_type == 'zernike':
+                    delta = 8 * m + 1
+                    order = int(np.sqrt(delta) - 3)//2
+                elif fet_type == 'zernike1d':
+                    order = (m - 1)*2
+                elif fet_type == 'legendre': # to do FETs 
+                    order = (m - 1) 
+                fet_deplete = {'name' : fet_type,
+                               'order': order,
+                               'radius': radius,
+                               'offset': offset}
+                if (fet_type=='legendre-x' or \
+                    fet_type=='legendre-y' or \
+                    fet_type=='legendre-z'):
+                    mat.update_nuclide(name, coeffs[2::], fet_deplete=fet_deplete) 
+                elif (fet_type=='zernike' or fet_type=='zernike1d'):
+                    mat.update_nuclide(name, coeffs[3::], fet_deplete=fet_deplete) # skip offset values 
 
         # Get each S(a,b) table
         for sab in elem.findall('sab'):

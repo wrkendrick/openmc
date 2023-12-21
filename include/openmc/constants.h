@@ -308,7 +308,17 @@ enum TallyScore {
   SCORE_FISS_Q_PROMPT = -14,      // prompt fission Q-value
   SCORE_FISS_Q_RECOV = -15,       // recoverable fission Q-value
   SCORE_DECAY_RATE = -16,         // delayed neutron precursor decay rate
-  SCORE_PULSE_HEIGHT = -17        // pulse-height
+  SCORE_PULSE_HEIGHT = -17,       // pulse-height
+  SCORE_KAPPA_FISSION_ZN = -23,   // Zernike poly expansion for kappa fission
+  SCORE_ABSORPTION_ZN = -24,      // Zernike poly expansion for absorption
+  SCORE_FLUX_ZN = -25,            // Zernike poly expansion for flux
+  SCORE_FISSION_ZN = -26,         // Micro rate of fission with Zernike polynomial
+  SCORE_GAMMA_ZN = -27,           // Micro rate of fission with Zernike polynomial
+  SCORE_KAPPA_FISSION_Z1D = -28,  // Zernike poly expansion 1D kappa fission
+  SCORE_ABSORPTION_Z1D = -29,     // Zernike poly expansion 1D absorption
+  SCORE_FLUX_Z1D = -30,           // Zernike poly expansion 1D flux
+  SCORE_FISSION_Z1D = -31,        // Micro rate of fission with Zernike polynomial
+  SCORE_GAMMA_Z1D = -32           // Micro rate of n-gamma with Zernike polynomial
 };
 
 // Global tally parameters

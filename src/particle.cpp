@@ -203,6 +203,8 @@ void Particle::event_advance()
     collision_distance() = 0.0;
   } else if (macro_xs().total == 0.0) {
     collision_distance() = INFINITY;
+  } else if (model::materials[material()]->continuous_num_density_) {
+    collision_distance() = sampling_cvmt(this, boundary().distance);
   } else {
     collision_distance() = -std::log(prn(current_seed())) / macro_xs().total;
   }
@@ -857,6 +859,366 @@ ParticleType str_to_particle_type(std::string str)
   } else {
     throw std::invalid_argument {fmt::format("Invalid particle name: {}", str)};
   }
+}
+
+//==============================================================================
+// cvmt implementation 
+//==============================================================================
+double Particle::sampling_cvmt(Particle *p, double d_boundary)
+{
+  std::vector<double> xs_t; //! The total cross section along flight path
+  double PNC;          //! local variables in the following  
+  double tau_hat; 
+  Position xyz_orig;  
+  double d_collision {0.0};
+  double optical_depth {0.0};
+  //
+  // p->E_ = 1e-5;
+  // p->coord_[p->n_coord_-1].r = {0.0, 0.0, 0.0};
+  // d_boundary = 0.1;
+  // 
+  xs_t.resize(settings::cvmt_intervals + 1);
+  simpsons_path_integration(optical_depth, d_boundary, xs_t, false, 0);
+  //std::cout<<optical_depth<<std::endl;
+  PNC = std::exp(-optical_depth);
+  if(prn(current_seed()) <= PNC) {   //! no collision
+    d_collision = INFINITY;
+  } else {             //! collision   
+    //! sample optical depth 
+    tau_hat = -std::log(1.0 - (1.0 - PNC) * prn(current_seed()));
+    //! get the flight distance for sampled optical depth
+    estimate_flight_distance(xs_t, d_boundary, tau_hat, d_collision);
+    //! move particle to the point of collision so we can make sure that
+    xyz_orig = p->coord(p->n_coord()-1).r;
+    //! cross sections are updated for later tallying of keff and user tallies
+    move_particle_coord(p->coord(p->n_coord()-1), d_collision);
+    model::materials[material()]->calculate_xs(*p);
+    //! move particle back
+    p -> coord(p -> n_coord()-1).r  = xyz_orig;
+  }
+  // std::cout<<d_collision<<std::endl;
+  //std::cout<<d_boundary<<'\t'<<optical_depth<<'\t'<<PNC<<'\t'<<d_collision<<'\t'<<p->E_<<std::endl;
+  //std::exit(-1);
+  return d_collision;
+}
+
+void Particle::move_particle_coord(LocalCoord &coord, double ds)
+{
+  coord.r += ds*coord.u;
+  return;
+}
+
+void Particle::copy_data(LocalCoord &to, LocalCoord from)
+{
+  to.r = from.r;
+  to.u = from.u;
+  to.cell = from.cell;
+  to.universe = from.universe;
+  to.lattice = from.lattice;
+  to.lattice_i[0] = from.lattice_i[0];
+  to.lattice_i[1] = from.lattice_i[1];
+  to.lattice_i[2] = from.lattice_i[2];
+  to.rotated = from.rotated;
+  return;
+}
+
+void Particle::simpsons_path_integration(double &optical_depth, double distance, std::vector<double> &xs_t, bool dbg_file, int it_num)
+{
+  double ds;
+  double new_temp;
+  std::string format;
+  char fname[128] {""};
+  int i;
+  LocalCoord coord;
+  FILE *fp;
+  //
+  copy_data(coord, this -> coord(this -> n_coord() - 1));
+  //
+  ds = distance / (double)(settings::cvmt_intervals);
+  // 
+  if (dbg_file) {
+    sprintf(fname, "particle_%5d_it_%5d.out" , (int)this->id(), it_num);
+    printf("Opening file %s", fname);
+    fp = std::fopen(fname,"w");
+    fprintf(fp, "%15.7f %15.7f %15.7f %15.7f %15.7f \n",  
+            this -> coord(this -> n_coord()-1).u[0], 
+            this -> coord(this -> n_coord()-1).u[1], 
+            this -> coord(this -> n_coord()-1).u[2], 
+            this -> E(), ds);
+  }
+
+  for(i=1; i<=(settings::cvmt_intervals+1); i++){ 
+    //! Recalculate the cross section
+    model::materials[material()]->calculate_xs(*this);
+    //! Save the total cross section
+    xs_t[i-1] = macro_xs().total;  
+    if(dbg_file) {
+      printf("String being written to file %s\n :", fname);
+      printf("%15.7f %15.7f %15.7f %15.7f %15.7f \n", 
+              this -> coord(this -> n_coord()-1).r[0],  
+              this -> coord(this -> n_coord()-1).r[1], 
+              this -> coord(this -> n_coord()-1).r[2], 
+              new_temp, xs_t[i-1]);
+      fprintf(fp, "%15.7f %15.7f %15.7f %15.7f %15.7f \n", 
+              this -> coord(this -> n_coord()-1).r[0],  
+              this -> coord(this -> n_coord()-1).r[1], 
+              this -> coord(this -> n_coord()-1).r[2], 
+              new_temp, xs_t[i-1]);
+    }
+    //! Move particle along path
+    move_particle_coord(this -> coord(this -> n_coord()-1), ds);
+  }
+  //
+  copy_data(this -> coord(this -> n_coord()-1), coord);
+  //
+  optical_depth = 0.0; 
+  for( i=1; i<=(settings::cvmt_intervals-1); i=i+2){
+    //! Add to the integral
+    optical_depth = optical_depth + 2.0 * ds / 6.0 * ( xs_t[i-1] + 4.0 * xs_t[i+1-1] + xs_t[i+2-1]);
+  }
+  if(dbg_file) fclose(fp);
+  return; 
+}
+
+void Particle::estimate_flight_distance(std::vector<double> xs_t, double distance, double tau_hat, double &s)
+{
+  double ds;
+  double delta_tau_hat;
+  double optical_depth;
+  int index;
+  bool tau_overrun;
+  double a, b, c, d;
+  double m;
+  double dds {0.0}; 
+  //
+  //! Calculate differential path length
+  ds = distance / (double)(settings::cvmt_intervals);
+  //! Set variables for loop
+  optical_depth = 0.0;
+  index = 1;
+  tau_overrun = false;
+  //! Find the index of the cell that goes over the sampled path integration
+  while(optical_depth <= tau_hat){
+    if (index > (settings::cvmt_intervals - 1)) {
+      tau_overrun = true;
+      optical_depth = tau_hat;
+    } else {
+      optical_depth = optical_depth + \
+      2.0 * ds / 6.0 * ( xs_t[index-1] + \
+      4.0 * xs_t[index] + xs_t[index+1]);
+      index = index + 2;
+    }
+  }
+  //! Subtract off the last delta optical depth that we added
+  index = index - 2;
+  optical_depth = optical_depth - \
+       2.0 * ds / 6.0 * ( xs_t[index-1] + \
+       4.0 * xs_t[index] + xs_t[index+1]);
+  //! Calculate the delta in the optical depth
+  delta_tau_hat = tau_hat - optical_depth;
+  //
+  if (tau_overrun) {
+    printf("WARNING: The search for the optical depth bin failed");
+    printf("tau_hat = %15.7f", tau_hat);
+    printf("optical_depth = %15.7f", optical_depth);
+    s = distance;
+  } else {
+    //! Determine the coefficients for a second order expansion in that bin
+    //! sigma_t = ax^2 + bx + c
+    //! Note that we are shifting the portion of the curve so that the first
+    //! point lies at zero.  This makes integration much easier.
+    c = xs_t[index-1];
+    b = (2.0 * xs_t[index] - 0.5 * xs_t[index+1] - 1.5 * c) / (ds);
+    a = (xs_t[index+1] - c - 2.0 * ds * b) / (4.0 * ds * ds);
+    //! Define quantities for solution of the cubic equation
+    b = b / 2.0;
+    a = a / 3.0;
+    d = -delta_tau_hat;
+    //! If the polynomial is not truly cubic, the soluiton will blow up
+    //! Choose between integrated polynomial of cubic,quadratic, and linear
+    if (fabs(a) > 1E-10) {
+      get_cubic_root(a, b, c, d, 0.0, 2.0*ds, dds);
+      s = ds * (index-1) + dds;
+    } else if (fabs(b) > 1E-10) {
+      //! Get the best guest for root based on a linear fit
+      m = (xs_t[index+1] - xs_t[index-1]) / (2.0 * ds);
+      get_quadratic_root(0.5 * m, c, d, 0.0, 2.0 * ds, dds);
+      s = ds * (index-1) + dds;
+    } else {
+      //! This is the case where the cross section is constant.
+      s = ds * (index-1) - d/c;
+      //! Put some checks in for now
+      if (s < (ds * (index-1)) || s > (ds * (index+1)) ) {
+        printf("a = %15.7f\n", a);
+        printf("b = %15.7f\n", b);
+        printf("c = %15.7f\n", c);
+        printf("ds = %15.7f\n", ds);
+        printf("xs_t(1) = %15.7f\n", xs_t[index-1]);
+        printf("xs_t(2) = %15.7f\n", xs_t[index]);
+        printf("xs_t(3) = %15.7f\n", xs_t[index+1]);
+        printf("s = %15.7f\n", s);
+        printf("distance = %15.7f\n", distance);
+        printf("optical_depth = %15.7f\n", optical_depth);
+        printf("tau_hat = %15.7f\n", tau_hat);
+        printf("delta_tau_hat = %15.7f\n", delta_tau_hat);
+        printf("index = %15d\n", index);
+        printf("ds*(index-1) = %15.7f\n", ds * (index-1));
+        printf("ds*(index) = %15.7f\n", ds * (index));
+        fatal_error("The s for the constant cross section case lies out of bounds");
+      }
+    }
+  }
+  if (s > distance || s < 0.0) {
+    printf("a = %15.7f\n", a);
+    printf("b = %15.7f\n", b);
+    printf("c = %15.7f\n", c);
+    printf("d = %15.7f\n", d);
+    printf("ds = %15.7f\n", ds);
+    printf("index = %15d\n", index);
+    printf("ds*(index-1) = %15.7f\n", ds*(index-1));
+    printf("xs_t(1) = %15.7f\n", xs_t[index-1]);
+    printf("xs_t(2) = %15.7f\n", xs_t[index]);
+    printf("xs_t(3) = %15.7f\n", xs_t[index+1]);
+    printf("s = %15.7f\n", s);
+    printf("distance = %15.7f\n", distance);
+    printf("optical_depth = %15.7f\n", optical_depth);
+    printf("tau_hat = %15.7f\n", tau_hat);
+    printf("delta_tau_hat = %15.7f\n", delta_tau_hat);
+    printf("dds = %15.7f\n", dds);
+    fatal_error("The predicted distance is greater than distance to boundary or less than zero");
+  }
+  return;
+}
+
+double Particle::sign(double aa, double bb)
+{
+  if(bb>1e-50) { 
+    return aa;
+  } else if (bb<-1e-50) {
+    return -aa;
+  } else {
+    return 0.0;
+  }
+}
+
+void Particle::get_quadratic_root(double a, double b, double c, double lower_b, double upper_b, double &root)
+{
+  //
+  double q;
+  double C_1, C_2;
+  double e1, e2, e3, e4;
+  double min_error;
+  double inner_sqrt;
+  //
+  inner_sqrt = b * b - 4.0 * a * c;
+  if( inner_sqrt < 0.0) {
+    printf("a = %15.7f", a);
+    printf("b = %15.7f", b);
+    printf("c = %15.7f", c);
+    printf("inner_sqrt = %15.7f", inner_sqrt);
+    fatal_error("Non real roots for quadratic equation");
+  } else if (inner_sqrt >= 0) {  
+    q = -1.0 / 2.0 * ( b + sign(1.0, b) * std::sqrt(inner_sqrt) );
+    C_1 = q / a;
+    C_2 = c / q ; 
+    if (C_1 >= lower_b && C_1 <= upper_b) {
+      root = C_1;
+    } else if (C_2 >= lower_b && C_2 <= upper_b) {
+      root = C_2;
+    } else {
+      e1 = abs(C_1 - lower_b);
+      e2 = abs(C_1 - upper_b);
+      e3 = abs(C_2 - lower_b);
+      e4 = abs(C_2 - upper_b);
+      min_error = std::min(std::min(std::min(e1, e2), e3), e4);
+      if ( abs(e1) == min_error || abs(e3) == min_error) {
+        root = lower_b;
+      } else if ( abs(e2) == min_error || abs(e4) == min_error) {
+        root = upper_b;
+      } else {
+        fatal_error("Invalid case for handling quadratic bounds overload");
+      }  
+      printf("C_1 = %15.7f", C_1);
+      printf("C_2 = %15.7f", C_2);
+      printf("Lower bound = %15.7f", lower_b);
+      printf("Upper bound = %15.7f", upper_b);
+      printf("C_1 - lower_bound = %15.7f", C_1 - lower_b);
+      printf("C_2 - lower_bound = %15.7f", C_2 - lower_b);
+      printf("C_1 - upper_bound = %15.7f", C_1 - upper_b);
+      printf("C_2 - upper_bound = %15.7f", C_2 - upper_b);
+      printf("a = %15.7f", a);
+      printf("b = %15.7f", b);
+      printf("c = %15.7f", c);
+      printf("ERROR:  Neither quadratic roots satisifed the criteria");
+      printf("warning: Quadratic roots not within 1E-5 of bounds");
+    }
+  }
+  return;
+}
+
+void 
+Particle::get_cubic_root(double a, double b, double c, double d, double lower_b, double upper_b, double& root) {
+  double aa, bb, cc;  // Coefficients in x^3 + aa * x^2 + bb * x + cc = 0 
+  double Q, R, dd, ee, theta;
+  //! Calculate coefficients as they appear in the numerical recipes book
+  aa = b / a;
+  bb = c / a;
+  cc = d / a;
+  Q = (aa*aa - 3.0 * bb) / (9.0);
+  R = (2.0 * aa * aa * aa - 9.0 * aa * bb + 27.0 * cc) / (54.0);
+  if (R*R < Q*Q*Q) {
+    theta = std::acos(R/std::sqrt(Q*Q*Q));
+    root = -2.0 * std::sqrt(Q) * std::cos(theta/3.0) - aa / 3.0;
+    if (root < lower_b || root > upper_b) {
+      root = -2.0 * std::sqrt(Q) * std::cos( (theta + 2.0 * PI) / 3.0) - aa / 3.0;
+      if (root < lower_b || root > upper_b) {
+        root = -2.0 * std::sqrt(Q) * std::cos( (theta - 2.0 * PI) / 3.0) - aa / 3.0;
+        if (root < lower_b || root > upper_b) {
+          if (root < lower_b) {
+            root = lower_b;
+          } else {
+            root = upper_b;
+          }
+          printf("root = %15.7f", root);
+          printf("lower_b = %15.7f", lower_b);
+          printf("upper_b = %15.7f", upper_b);
+          printf("a = %15.7f", a);
+          printf("b = %15.7f", b);
+          printf("c = %15.7f", c);
+          printf("d = %15.7f", d);
+          printf("warning:Acceptable cubic root not found");
+        }
+      }
+    }
+  } else {
+    if (R >= 0.0) {
+      dd = -std::pow((std::abs(R) + std::sqrt(std::abs(R*R-Q*Q*Q))), 1.0/3.0);
+    } else {
+      dd = std::pow(std::abs(R) + std::sqrt(std::abs(R*R-Q*Q*Q) ), 1.0/3.0);
+    } 
+    if (dd == 0.0) {
+      ee = 0.0;
+    } else {
+      ee = Q/dd;
+    }
+    root = (dd + ee) - aa / 3.0;
+    if (root < lower_b || root > upper_b) {     
+      if (root < lower_b) {
+        root = lower_b;
+      } else {
+        root = upper_b;
+      }
+      printf("root = %15.7f", root);
+      printf("lower_b = %15.7f", lower_b);
+      printf("upper_b = %15.7f", upper_b);
+      printf("a = %15.7f", a);
+      printf("b = %15.7f", b);
+      printf("c = %15.7f", c);
+      printf("d = %15.7f", d);
+      printf("warning:Acceptable cubic root not found");
+    }
+  }
+  return; 
 }
 
 } // namespace openmc
