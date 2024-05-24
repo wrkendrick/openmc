@@ -42,6 +42,8 @@ public:
   std::vector<double> coeffs_; //! coefficients for poly evaluation
   int n_coeffs_; //! number of coeffs
   int order_; //! the order of the expansion
+  int combined_orders_[2]; //! order of the legendre, zernike polynomials for combined evaluation
+  int combined_lengths_[2]; //! lengths of the coefficients of the legendre, zernike polynomial groups
   double radius_; //! radius of the expansion
   double min_, max_; //! offset of legendre expansion 
   std::string orientation_; //! orientation of legendre expansion, 'x', 'y', 'z'
@@ -64,6 +66,7 @@ public:
   double evaluate_legendre(Position r) const;
   double evaluate_legendre2d(Position r) const;
   double evaluate_legendre_axial(Position r) const;
+  double evaluate_combined(Position r) const;
   // set dimension for vectors 
   void set_order(std::string type, int order);
   void set_coeffs(double coeffs[]);
@@ -71,6 +74,8 @@ public:
   void set_order_axial(int order);
   void set_coeffs_axial(double coeffs_axial[]);
   void set_axial_offset(double zmin, double zmax);
+  void set_combined_params(double params[]);
+  void set_combined_coeffs(double coeffs[]);
   // constructor and destructor 
   PolyProperty();
   ~PolyProperty();

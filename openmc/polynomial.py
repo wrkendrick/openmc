@@ -131,6 +131,7 @@ class Zernike(Polynomial):
 
     def __call__(self, r, theta=0.0):
         import openmc.lib as lib
+        print(self._norm_coef)
         if isinstance(r, Iterable) and isinstance(theta, Iterable):
             return [[np.sum(self._norm_coef * lib.calc_zn(self.order, r_i / self.radius, theta_i))
                     for r_i in r] for theta_i in theta]

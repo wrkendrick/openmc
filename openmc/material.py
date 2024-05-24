@@ -553,7 +553,8 @@ class Material(IDManagerMixin):
     def add_nuclide(self, nuclide: str, percent: float, percent_type: str = 'ao', 
                     poly=None, zernike=None, zernike1d=None, poly_coeffs=None,
                     legendre=None, legendre_x=None, legendre_y=None, 
-                    legendre_z=None, legendre_xy=None, legendre_yz=None, legendre_xz=None):
+                    legendre_z=None, legendre_xy=None, legendre_yz=None, legendre_xz=None,
+                    combined=None):
         """Add a nuclide to the material
 
         Parameters
@@ -612,6 +613,9 @@ class Material(IDManagerMixin):
                 self._nuclides.append(NuclideTuple(nuclide, percent, percent_type, [poly_coeffs, poly_type]))
             else:
                 self._nuclides.append(NuclideTuple(nuclide, percent, percent_type, []))
+        elif combined is not None:
+            poly_type = 'combined'
+            self._nuclides.append(NuclideTuple(nuclide, percent, percent_type, [combined, poly_type]))
         elif zernike is not None:
             poly_type = 'zernike'
             if legendre is not None:

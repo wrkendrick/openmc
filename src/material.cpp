@@ -207,45 +207,63 @@ Material::Material(pugi::xml_node node)
           auto n_coeffs = coeffs.size() - 2; // skip two values for offset 
           auto order = 0;
           // Set order based on polynomial type.
-          if (type == "zernike1d") {
-            order = 2 * (n_coeffs - 2);
-          } else if (type == "zernike") {
-            auto p = 1;
-            auto temp_int = 0;
-            while(p < n_coeffs) {
-              p += temp_int + 1;
-              temp_int += 1; 
-            }
-            if(p == n_coeffs) {
-              order = temp_int - 1;
-            } else {
-              fatal_error("Correct polynomial order could not be determined.");
-            }
-          } else if (type == "legendre-x" || type == "legendre-y" || type == "legendre-z") {
-            order = n_coeffs - 1; 
-          } else if (type == "legendre-xy" || type == "legendre-yz" || type == "legendre-xz") {
-            order = n_coeffs - 2; // skip another two offsets 
-            order = order/2 - 1; // assume two dimensions have the same order
-          }
-          // Initialize polynomial property.
           PolyProperty temp_poly; 
-          temp_poly.set_order(type, order);
-          temp_poly.set_coeffs(coeffs.data());
-          // Process normalization factor.
-          temp_poly.apply_normalization();
-          // Check if axial Legendre polynomial is specified.
-          if (check_for_node(node_nuc, "axial_coeffs")) {
-            auto axial_type = "legendre";
-            auto coeffs_axial = get_node_array<double>(node_nuc, "axial_coeffs");
-            auto n_coeffs_axial = coeffs_axial.size();
-            auto zmin = coeffs_axial[0]; // zmin, zmax, order+1 of coefficients  
-            auto zmax = coeffs_axial[1];
-            auto order_axial = coeffs_axial.size() - 3;
-            // Assign flag to indicate axial distribution using legendre polynomial.
-            temp_poly.axial_ = true;
-            temp_poly.set_order_axial(order_axial);
-            temp_poly.set_axial_offset(zmin, zmax);
-            temp_poly.set_coeffs_axial(&coeffs_axial[2]);
+          if (type == "combined") {
+            n_coeffs = coeffs.size() - 7;
+            std::vector<double> parameters {coeffs.begin(),coeffs.begin()+7};
+            std::vector<double> coefficients {coeffs.begin()+7,coeffs.end()};
+            //std::cout << "parameters:\n";
+            //for (int i=0;i<parameters.size();i++) {
+            //  std::cout << parameters[i] << "\n";
+            //}
+            //std::cout << "Coefficients:\n";
+            //for (int i=0;i<coefficients.size();i++) {
+            //  std::cout<<coefficients[i]<<"\n";
+            //}
+            temp_poly.set_combined_params(parameters.data());
+            temp_poly.set_combined_coeffs(coefficients.data());
+          }
+          else {
+            if (type == "zernike1d") {
+              order = 2 * (n_coeffs - 2);
+            } else if (type == "zernike") {
+              auto p = 1;
+              auto temp_int = 0;
+              while(p < n_coeffs) {
+                p += temp_int + 1;
+                temp_int += 1; 
+              }
+              if(p == n_coeffs) {
+                order = temp_int - 1;
+              } else {
+                fatal_error("Correct polynomial order could not be determined.");
+              }
+            } else if (type == "legendre-x" || type == "legendre-y" || type == "legendre-z") {
+              order = n_coeffs - 1; 
+            } else if (type == "legendre-xy" || type == "legendre-yz" || type == "legendre-xz") {
+              order = n_coeffs - 2; // skip another two offsets 
+              order = order/2 - 1; // assume two dimensions have the same order
+            }
+            // Initialize polynomial property.
+            
+            temp_poly.set_order(type, order);
+            temp_poly.set_coeffs(coeffs.data());
+            // Process normalization factor.
+            temp_poly.apply_normalization();
+            // Check if axial Legendre polynomial is specified.
+            if (check_for_node(node_nuc, "axial_coeffs")) {
+              auto axial_type = "legendre";
+              auto coeffs_axial = get_node_array<double>(node_nuc, "axial_coeffs");
+              auto n_coeffs_axial = coeffs_axial.size();
+              auto zmin = coeffs_axial[0]; // zmin, zmax, order+1 of coefficients  
+              auto zmax = coeffs_axial[1];
+              auto order_axial = coeffs_axial.size() - 3;
+              // Assign flag to indicate axial distribution using legendre polynomial.
+              temp_poly.axial_ = true;
+              temp_poly.set_order_axial(order_axial);
+              temp_poly.set_axial_offset(zmin, zmax);
+              temp_poly.set_coeffs_axial(&coeffs_axial[2]);
+            }
           }
           poly_densities_.push_back(temp_poly);
         }
@@ -1950,7 +1968,9 @@ double PolyProperty::evaluate(Position r) const {
     results = evaluate_legendre(r);
   } else if (type_ == "legendre2d") {
     results = evaluate_legendre2d(r);
-  }  
+  }  else if (type_ == "combined") {
+    results = evaluate_combined(r);
+  }
   // 3D mode.
   if (axial_){
     results *= evaluate_legendre_axial(r);
@@ -2107,6 +2127,38 @@ double PolyProperty::evaluate_legendre_axial(Position r) const {
   return property;
 }
 
+double PolyProperty::evaluate_combined(Position r) const {
+  // instantiate
+  double property {0.0};
+  std::vector<double> zern_results;
+  std::vector<double> lege_results;
+  // normalize positions
+  auto offset_x = r.x - center_offset_[0];
+  auto offset_y = r.y - center_offset_[1];
+  double rho = std::sqrt(offset_x * offset_x + offset_y * offset_y)/radius_;
+  double phi = std::atan2(offset_y, offset_x);
+  double zeta = 2.0 * (r.z - min_) / (max_ - min_) - 1.0;
+  // calculate polynomial returns
+  lege_results.resize(combined_lengths_[0]);
+  zern_results.resize(combined_lengths_[1]);
+  calc_pn_c(combined_orders_[0], zeta, lege_results.data());
+  calc_zn(combined_orders_[1], rho, phi, zern_results.data());
+  // multiply by expansion coefficients to get value
+  int k = 0;
+  for (int i=0; i<combined_lengths_[0]; i++) {
+    for (int j=0; j<combined_lengths_[1]; j++ ) {
+      property += lege_results[i] * zern_results[j] * coeffs_[k];
+      k++;
+    }
+  }
+  //std::cout << "Position: " << r.x<<" "<<r.y<<" "<<r.z << "\n";
+  //std::cout << "pin loc: "<<center_offset_[0]<<" "<<center_offset_[1]<<"\n";
+  //std::cout << "inputs: "<<rho<<" "<<phi<<" "<<zeta<<"\n";
+  //std::cout << "Value: " << property << "\n";
+  //fatal_error("BREAK.");
+  return property;
+}
+
 PolyProperty::PolyProperty(){
   // Constructor 
 }
@@ -2236,6 +2288,26 @@ void PolyProperty::set_coeffs_axial(double coeffs_axial[]){
 void PolyProperty::set_axial_offset(double zmin, double zmax){
   axial_offset_[0] = zmin;
   axial_offset_[1] = zmax;
+}
+
+void PolyProperty::set_combined_params(double params[]){
+  combined_orders_[0] = params[0];
+  combined_orders_[1] = params[3];
+  combined_lengths_[0] = combined_orders_[0]+1;
+  combined_lengths_[1] = (combined_orders_[1]+1)*(combined_orders_[1]+2)/2;
+  min_ = params[1];
+  max_ = params[2];
+  center_offset_[0] = params[4];
+  center_offset_[1] = params[5];
+  radius_ = params[6];
+  type_ = "combined";
+}
+
+void PolyProperty::set_combined_coeffs(double coeffs[]){
+  coeffs_.resize(combined_lengths_[0]*combined_lengths_[1]);
+  for (int i=0; i<coeffs_.size(); i++){
+    coeffs_[i] = coeffs[i];
+  }
 }
 
 PolyProperty::~PolyProperty(){
