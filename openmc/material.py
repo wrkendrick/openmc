@@ -169,11 +169,11 @@ class Material(IDManagerMixin):
             string += '=\t{: <12} [{}]\n'.format(percent, percent_type)
             if len(tmp_args) > 0: # cvmt FETs zernike, zernikeld, legendre
                 string += '\t{: <14} =\t [{}]\n'.format('poly_coeffs', \
-                          ' '.join([str(c) for c in tmp_args[0]]))               
-                string += '\t{: <14} =\t [{}]\n'.format('poly_type', tmp_args[1])       
+                          ' '.join([str(c) for c in tmp_args[0][0]]))               
+                string += '\t{: <14} =\t [{}]\n'.format('poly_type', tmp_args[0][1])       
             if len(tmp_args) > 2: # cvmt FETs axial coeffts
                 string += '\t{: <14} =\t [{}]\n'.format('axial_coeffs', \
-                          ' '.join([str(c) for c in tmp_args[2]]))
+                          ' '.join([str(c) for c in tmp_args[0][2]]))
 
         if self._macroscopic is not None:
             string += '{: <16}\n'.format('\tMacroscopic Data')
