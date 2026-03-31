@@ -120,6 +120,10 @@ public:
   //! \param[in] ncrystal_xs Thermal scattering xs from NCrystal
   void update_neutron_xs(int i_nuclide, int i_grid = C_NONE, int i_sab = C_NONE,
     double sab_frac = 0.0, double ncrystal_xs = -1.0);
+
+  #ifdef OPENMC_LIBMESH_ENABLED
+  double fe_solution_sampling(double max_distance, const std::string& method);
+  #endif
 };
 
 //============================================================================

@@ -36,6 +36,11 @@
 #include "openmc/weight_windows.h"
 #include "openmc/xml_interface.h"
 
+#ifdef OPENMC_LIBMESH_ENABLED
+#include "openmc/libmesh_interface.h"
+//#include "openmc/petsc_fe_sampling.h"
+#endif
+
 namespace openmc {
 
 //==============================================================================
@@ -96,6 +101,13 @@ std::string path_sourcepoint;
 std::string path_statepoint;
 const char* path_statepoint_c {path_statepoint.c_str()};
 std::string weight_windows_file;
+
+#ifdef OPENMC_LIBMESH_ENABLED
+std::string fe_solution_file;
+std::string fe_mesh_file;
+std::string fe_system_name {"nl0"};
+std::string fe_variable_name {"temp"};
+#endif
 
 int32_t n_inactive {0};
 int32_t max_lost_particles {10};
@@ -1146,6 +1158,74 @@ void read_settings_xml(pugi::xml_node root)
     temperature_range[1] = range.at(1);
   }
 
+  // After the temperature settings section (around line 1147), add:
+
+  #ifdef OPENMC_LIBMESH_ENABLED
+  // Finite element solution coupling settings
+  if (check_for_node(root, "fe_solution")) {
+    xml_node node_fe = root.child("fe_solution");
+    
+    // Path to the .xdr solution file (required)
+    if (check_for_node(node_fe, "file")) {
+      fe_solution_file = get_node_value(node_fe, "file");
+    }
+
+    // Path to the .xdr solution file (required)
+    if (check_for_node(node_fe, "meshfile")) {
+      fe_mesh_file = get_node_value(node_fe, "meshfile");
+    }
+    
+    // System name (optional, default "nl0")
+    if (check_for_node(node_fe, "system")) {
+      fe_system_name = get_node_value(node_fe, "system");
+    }
+    
+    // Variable name (optional, default "temp")
+    if (check_for_node(node_fe, "variable")) {
+      fe_variable_name = get_node_value(node_fe, "variable");
+    }
+    
+    // Load the solution if file is specified
+    if (!fe_solution_file.empty()) {
+      libmesh::load_solution(fe_solution_file, fe_mesh_file, fe_system_name, fe_variable_name);
+      write_message("Loaded FE solution from " + fe_solution_file, 5);
+    }
+  }
+  /*
+  // Finite element solution coupling settings (PETSc FE)
+  if (check_for_node(root, "fe_solution")) {
+    xml_node node_fe = root.child("fe_solution");
+
+    std::string fe_mesh_file;
+    std::string fe_solution_file;
+    std::string fe_options;
+
+    if (check_for_node(node_fe, "mesh")) {
+      fe_mesh_file = get_node_value(node_fe, "mesh");
+    }
+
+    if (check_for_node(node_fe, "solution")) {
+      fe_solution_file = get_node_value(node_fe, "solution");
+    }
+
+    if (check_for_node(node_fe, "options")) {
+      fe_options = get_node_value(node_fe, "options");
+    }
+
+    if (!fe_mesh_file.empty() && !fe_solution_file.empty()) {
+      PetscErrorCode ierr =
+        openmc::petsc_fe::load_solution(fe_mesh_file, fe_solution_file, fe_options);
+      if (ierr) {
+        fatal_error("Failed to load FE solution (PETSc) from " + fe_solution_file +
+                    " with mesh " + fe_mesh_file +
+                    " (PetscErrorCode = " + std::to_string(ierr) + ")");
+      }
+
+      write_message("Loaded PETSc FE solution from " + fe_solution_file, 5);
+    }
+  }*/
+  #endif
+
   // Check for tabular_legendre options
   if (check_for_node(root, "tabular_legendre")) {
     // Get pointer to tabular_legendre node
@@ -1276,6 +1356,14 @@ void free_memory_settings()
   settings::sourcepoint_batch.clear();
   settings::source_write_surf_id.clear();
   settings::res_scat_nuclides.clear();
+  
+#ifdef OPENMC_LIBMESH_ENABLED
+  settings::fe_solution_file.clear();
+  settings::fe_mesh_file.clear();
+  settings::fe_system_name = "nl0";
+  settings::fe_variable_name = "temp";
+  //libmesh::unload_solution();
+#endif
 }
 
 //==============================================================================

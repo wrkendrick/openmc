@@ -237,10 +237,6 @@ void Particle::event_calculate_xs()
 
 // Timing.
 using Clock = std::chrono::high_resolution_clock;
-
-// Set to true to enable detailed timing output
-constexpr bool LEACS_DEBUG_MODE = false;
-
 static double total_multipole_check = 0;
 static double total_libmesh_sample = 0;
 static double total_xs_calc = 0;
@@ -338,6 +334,7 @@ constexpr int N_TAUS = N_SEGMENTS + 1;
 
 double Particle::fe_solution_sampling(double max_distance, const std::string& method)
 {
+
   auto t0 = Clock::now();
 
   // Get pointer to current material
@@ -397,19 +394,6 @@ double Particle::fe_solution_sampling(double max_distance, const std::string& me
     libmesh::sample_along_ray(positions, temperatures);
     //libmesh::sample_along_ray_fast(r0, dir, distances, temperatures);
     //petsc_fe::sample_along_ray(positions,temperatures);
-
-    // TODO: REMOVE THIS AFTER DEBUGGING.
-    for (int i = 0; i < N_SAMPLES; ++i) {
-      if (std::isnan(temperatures[i]) || temperatures[i] <= 0.0) {
-        fmt::print("=== Bad libMesh temperature at sample point {} ===\n", i);
-        fmt::print("  T = {}, position = ({}, {}, {})\n",
-          temperatures[i], positions[i][0], positions[i][1], positions[i][2]);
-        fmt::print("  particle id = {}, E = {}\n", id(), E());
-        fmt::print("  r0 = ({}, {}, {}), dir = ({}, {}, {})\n",
-          r0[0], r0[1], r0[2], dir[0], dir[1], dir[2]);
-        fmt::print("  material = {}, distance = {}\n", material(), distances[i]);
-      }
-    }
 
     auto t3 = Clock::now();
     total_libmesh_sample += std::chrono::duration<double>(t3 - t2).count();
@@ -491,14 +475,14 @@ double Particle::fe_solution_sampling(double max_distance, const std::string& me
       total_integration += std::chrono::duration<double>(t5 - t4).count();
       leacs_sample_time += std::chrono::duration<double>(t5 - t0).count();
       leacs_call_count++;
-      if (LEACS_DEBUG_MODE && leacs_call_count % 10000 == 0) {
+      if (leacs_call_count % 10000 == 0) {
         std::cout << "===== FE SAMPLING TIMING (avg per call, " << leacs_call_count << " calls) =====\n";
         std::cout << "Multipole check: " << (total_multipole_check / leacs_call_count) * 1e6 << " us\n";
         std::cout << "LibMesh sample:  " << (total_libmesh_sample / leacs_call_count) * 1e6 << " us\n";
         std::cout << "XS calculation:  " << (total_xs_calc / leacs_call_count) * 1e6 << " us\n";
         std::cout << "Integration:     " << (total_integration / leacs_call_count) * 1e6 << " us\n";
         std::cout << "Total time:      " << (leacs_sample_time / leacs_call_count) * 1e6 << " us\n";
-        std::cout << "Frac. of calls that use survive notinrange check: " << (100*leacs_call_count/(leacs_call_count+notinrange_call_count)) << " %\n";
+        std::cout << "Frac. of calls that use LEACS: " << (100*leacs_call_count/(leacs_call_count+notinrange_call_count)) << " %\n";
         std::cout << "================================================\n";
       }
       return INFINITY;
@@ -527,60 +511,27 @@ double Particle::fe_solution_sampling(double max_distance, const std::string& me
     double B = b / 2.0;
     double D = -(tau_local + c * r0_seg + B * r0_sq + A * r0_cubed);
 
-    // Hybrid Newton-bisection solver.
-    double r_lo = r0_seg;
-    double r_hi = distances[idx + 2];
+    // Newton-Raphson iteration
     double r_sol = r0_seg;
-
-    for (int iter = 0; iter < 50; ++iter) {
+    for (int iter = 0; iter < 10; ++iter) {
       double r_sq = r_sol * r_sol;
       double f = A * r_sq * r_sol + B * r_sq + c * r_sol + D;
       double f_prime = a * r_sq + b * r_sol + c;
 
-      // Newton step
-      double r_next;
-      if (std::abs(f_prime) > 1e-15) {
-        r_next = r_sol - f / f_prime;
-      } else {
-        r_next = 0.5 * (r_lo + r_hi); // degenerate derivative, bisect
-      }
+      if (std::abs(f_prime) < 1e-15) break;
 
-      // Accept Newton if in bounds, otherwise bisect
-      if (r_next < r_lo || r_next > r_hi) {
-        r_next = 0.5 * (r_lo + r_hi);
-      }
+      double delta = f / f_prime;
+      r_sol -= delta;
 
-      // Tighten bracket
-      double f_next = [&]{
-        double s = r_next * r_next;
-        return A * s * r_next + B * s + c * r_next + D;
-      }();
-
-      if (f_next < 0.0) {
-        r_lo = r_next;
-      } else {
-        r_hi = r_next;
-      }
-
-      r_sol = r_next;
-      if (r_hi - r_lo < 1e-10) break;
+      if (std::abs(delta) < 1e-10) break;
     }
-
-    /*
-    // Final safety check
-    if (r_sol < r0_seg || r_sol > r_end) {
-      fmt::print("=== Newton-Raphson out of bounds: r_sol={}, segment=[{}, {}] ===\n",
-        r_sol, r0_seg, r_end);
-      r_sol = std::clamp(r_sol, r0_seg, r_end);
-    }
-    */
 
     auto t5 = Clock::now();
     total_integration += std::chrono::duration<double>(t5 - t4).count();
     leacs_sample_time += std::chrono::duration<double>(t5 - t0).count();
 
     leacs_call_count++;
-    if (LEACS_DEBUG_MODE && leacs_call_count % 10000 == 0) {
+    if (leacs_call_count % 10000 == 0) {
       std::cout << "===== FE SAMPLING TIMING (avg per call, " << leacs_call_count << " calls) =====\n";
       std::cout << "Multipole check: " << (total_multipole_check / leacs_call_count) * 1e6 << " us\n";
       std::cout << "LibMesh sample:  " << (total_libmesh_sample / leacs_call_count) * 1e6 << " us\n";
@@ -595,24 +546,6 @@ double Particle::fe_solution_sampling(double max_distance, const std::string& me
     double a_T = temp_coeffs[coeff_idx + 2];
 
     double T_sampled = a_T * r_sol * r_sol + b_T * r_sol + c_T;
-
-    // TODO: REMOVE THIS AFTER DEBUG.
-    if (std::isnan(T_sampled) || T_sampled <= 0.0) {
-      fmt::print("=== Bad T_sampled in LEACS quadratic interpolation ===\n");
-      fmt::print("  T_sampled = {}\n", T_sampled);
-      fmt::print("  a_T = {}, b_T = {}, c_T = {}\n", a_T, b_T, c_T);
-      fmt::print("  r_sol = {}\n", r_sol);
-      fmt::print("  particle id = {}, E = {}\n", id(), E());
-      fmt::print("  segment index = {}, coeff_idx = {}\n", coeff_idx / 3, coeff_idx);
-      // Also print the underlying temperature samples used to build the quadratic
-      fmt::print("  Underlying T samples for this segment:\n");
-      int seg_idx = coeff_idx / 3;
-      int idx0 = 2 * seg_idx;
-      fmt::print("    T[{}]={} at d={}\n", idx0, temperatures[idx0], distances[idx0]);
-      fmt::print("    T[{}]={} at d={}\n", idx0+1, temperatures[idx0+1], distances[idx0+1]);
-      fmt::print("    T[{}]={} at d={}\n", idx0+2, temperatures[idx0+2], distances[idx0+2]);
-    }
-
     sqrtkT() = std::sqrt(K_BOLTZMANN * T_sampled);
     mat->calculate_xs(*this);
 

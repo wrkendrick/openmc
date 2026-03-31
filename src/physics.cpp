@@ -500,6 +500,15 @@ int sample_nuclide(Particle& p)
   const auto& mat {model::materials[p.material()]};
   int n = mat->nuclide_.size();
 
+  // TODO: REMOVE AFTER DEBUGGING.
+  if (std::isnan(p.macro_xs().total) || p.macro_xs().total <= 0.0) {
+  fmt::print("=== Bad macro_xs entering sample_nuclide ===\n");
+  fmt::print("  macro_xs.total = {}\n", p.macro_xs().total);
+  fmt::print("  p.E() = {}, p.sqrtkT() = {}\n", p.E(), p.sqrtkT());
+  fmt::print("  material = {}, density_mult = {}\n", p.material(), p.density_mult());
+  fmt::print("  material_last = {}, sqrtkT_last = {}\n", p.material_last(), p.sqrtkT_last());
+}
+
   double prob = 0.0;
   for (int i = 0; i < n; ++i) {
     // Get atom density
@@ -513,6 +522,22 @@ int sample_nuclide(Particle& p)
   }
 
   // If we reach here, no nuclide was sampled
+  std::cout << "PROBLEM WITH COLLISION NUCLIDE SAMPLING.\n";
+  prob = 0.0;
+  for (int i = 0; i < n; ++i) {
+    // Get atom density
+    int i_nuclide = mat->nuclide_[i];
+    double atom_density = mat->atom_density(i, p.density_mult());
+
+    // Increment probability to compare to cutoff
+    prob += atom_density * p.neutron_xs(i_nuclide).total;
+    std::cout << "prob: " << prob << " | cutoff: " << cutoff << "\n";
+    std::cout << "i_nuclide: " << i_nuclide << " | atom_density: " << atom_density << "\n";
+    std::cout << "p.neutron_xs(): " << p.neutron_xs(i_nuclide).total << "\n";
+
+    if (prob >= cutoff)
+      return i_nuclide;
+  }
   p.write_restart();
   throw std::runtime_error {"Did not sample any nuclide during collision."};
 }

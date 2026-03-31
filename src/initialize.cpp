@@ -40,6 +40,7 @@
 
 #ifdef OPENMC_LIBMESH_ENABLED
 #include "libmesh/libmesh.h"
+#include "openmc/libmesh_interface.h"  // Add this line
 #endif
 
 int openmc_init(int argc, char* argv[], const void* intracomm)
@@ -71,15 +72,11 @@ int openmc_init(int argc, char* argv[], const void* intracomm)
   // also)
   if (!settings::libmesh_init && !libMesh::initialized()) {
 #ifdef OPENMC_MPI
-    // pass command line args, empty MPI communicator, and number of threads.
-    // Because libMesh was not initialized, we assume that OpenMC is the primary
-    // application and that its main MPI comm should be used.
     settings::libmesh_init =
-      make_unique<libMesh::LibMeshInit>(argc, argv, comm, n_threads);
+      make_unique<libMesh::LibMeshInit>(argc, argv, comm);
 #else
-    // pass command line args, empty MPI communicator, and number of threads
     settings::libmesh_init =
-      make_unique<libMesh::LibMeshInit>(argc, argv, 0, n_threads);
+      make_unique<libMesh::LibMeshInit>(argc, argv);
 #endif
 
     settings::libmesh_comm = &(settings::libmesh_init->comm());

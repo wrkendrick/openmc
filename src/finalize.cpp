@@ -31,6 +31,10 @@
 
 #include "xtensor/xview.hpp"
 
+#ifdef OPENMC_LIBMESH_ENABLED
+#include "openmc/libmesh_interface.h"
+#endif
+
 namespace openmc {
 
 void free_memory()
@@ -171,7 +175,11 @@ int openmc_finalize()
   free_memory();
 
 #ifdef OPENMC_LIBMESH_ENABLED
-  settings::libmesh_init.reset();
+  // Clean up FE solution objects
+  libmesh::unload_solution();
+  // Don't reset libmesh_init - let it leak at exit to avoid destruction order issues
+  //settings::libmesh_init.reset();
+  settings::libmesh_init.release();  // Release ownership without destroying
 #endif
 
   // Free all MPI types
