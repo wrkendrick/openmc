@@ -34,6 +34,8 @@
 #include <algorithm> // for max, min, max_element
 #include <cmath>     // for sqrt, exp, log, abs, copysign
 
+
+
 namespace openmc {
 
 //==============================================================================
@@ -119,6 +121,7 @@ void sample_neutron_reaction(Particle& p)
 
   if (nuc->fissionable_ && p.neutron_xs(i_nuclide).fission > 0.0) {
     auto& rx = sample_fission(i_nuclide, p);
+
     if (settings::run_mode == RunMode::EIGENVALUE) {
       create_fission_sites(p, i_nuclide, rx);
     } else if (settings::run_mode == RunMode::FIXED_SOURCE &&
@@ -677,6 +680,8 @@ void absorption(Particle& p, int i_nuclide)
       p.event() = TallyEvent::ABSORB;
       if (!p.fission()) {
         p.event_mt() = N_DISAPPEAR;
+      } else {
+        p.fission_death() = true;
       }
     }
   }

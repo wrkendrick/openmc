@@ -29,6 +29,7 @@ class RunMode(Enum):
 
 
 _RES_SCAT_METHODS = {'dbrc', 'rvs'}
+_VALID_ENDPOINT_KEYS = {"fission_only", "collisions", "max_tracks"}
 
 
 class Settings:
@@ -500,6 +501,8 @@ class Settings:
         self._use_decay_photons = None
 
         self._random_ray = {}
+        
+        self._endpoint_track = None
 
         for key, value in kwargs.items():
             setattr(self, key, value)
@@ -1479,7 +1482,39 @@ class Settings:
         cv.check_less_than('source_rejection_fraction',
                            source_rejection_fraction, 1)
         self._source_rejection_fraction = source_rejection_fraction
+        
+    @property
+    def endpoint_track(self):
+        """dict or None: configuration for neutron birth/death endpoint recording.
 
+        See module docstring for accepted keys. ``None`` disables the feature.
+        """
+        return self._endpoint_track
+
+
+    @endpoint_track.setter
+    def endpoint_track(self, value):
+        if value is None:
+            self._endpoint_track = None
+            return
+        cv.check_type("endpoint_track", value, dict)
+        unknown = set(value) - _VALID_ENDPOINT_KEYS
+        if unknown:
+            raise ValueError(
+                f"Unknown endpoint_track key(s): {sorted(unknown)}. "
+                f"Valid keys are {sorted(_VALID_ENDPOINT_KEYS)}."
+            )
+        if "fission_only" in value:
+            cv.check_type("endpoint_track fission_only", value["fission_only"], bool)
+        if "collisions" in value:
+    	    cv.check_type("endpoint_track collisions", value["collisions"], bool)
+        if "max_tracks" in value:
+            cv.check_type("endpoint_track max_tracks", value["max_tracks"], Integral)
+            cv.check_greater_than(
+                "endpoint_track max_tracks", value["max_tracks"], 0
+            )
+        self._endpoint_track = value   
+    
     @property
     def free_gas_threshold(self) -> float | None:
         return self._free_gas_threshold
@@ -2559,6 +2594,34 @@ class Settings:
         text = get_text(root, 'free_gas_threshold')
         if text is not None:
             self.free_gas_threshold = float(text)
+            
+    def _create_endpoint_track_subelement(self, root):
+    	if self._endpoint_track is None:
+        	return
+    	cfg = self._endpoint_track
+    	elem = ET.SubElement(root, "endpoint_track")
+    	sub = ET.SubElement(elem, "fission_only")
+    	sub.text = str(bool(cfg.get("fission_only", False))).lower()
+    	sub = ET.SubElement(elem, "collisions")
+    	sub.text = str(bool(cfg.get("collisions", False))).lower()
+    	sub = ET.SubElement(elem, "max_tracks")
+    	sub.text = str(int(cfg.get("max_tracks", 100000)))
+    	
+    def _endpoint_track_from_xml_element(self, root):
+    	elem = root.find("endpoint_track")
+    	if elem is None:
+    	    return
+    	cfg = {}
+    	sub = elem.find("fission_only")
+    	if sub is not None:
+    	    cfg["fission_only"] = sub.text in ("true", "1")
+    	sub = elem.find("collisions")
+    	if sub is not None:
+    	    cfg["collisions"] = sub.text in ("true", "1")
+    	sub = elem.find("max_tracks")
+    	if sub is not None:
+    	    cfg["max_tracks"] = int(sub.text)
+    	self.endpoint_track = cfg
 
     def to_xml_element(self, mesh_memo=None):
         """Create a 'settings' element to be written to an XML file.
@@ -2637,6 +2700,7 @@ class Settings:
         self._create_use_decay_photons_subelement(element)
         self._create_source_rejection_fraction_subelement(element)
         self._create_free_gas_threshold_subelement(element)
+        self._create_endpoint_track_subelement(element)
 
         # Clean the indentation in the file to be user-readable
         clean_indentation(element)
@@ -2755,6 +2819,7 @@ class Settings:
         settings._use_decay_photons_from_xml_element(elem)
         settings._source_rejection_fraction_from_xml_element(elem)
         settings._free_gas_threshold_from_xml_element(elem)
+        settings._endpoint_track_from_xml_element(elem)
 
         return settings
 

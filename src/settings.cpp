@@ -154,6 +154,11 @@ int verbosity {-1};
 double weight_cutoff {0.25};
 double weight_survive {1.0};
 
+bool write_all_endpoints {false};
+bool endpoint_fission_only {false};
+bool endpoint_collisions {false};
+int64_t max_endpoint_tracks {100000};
+
 } // namespace settings
 
 //==============================================================================
@@ -1267,6 +1272,18 @@ void read_settings_xml(pugi::xml_node root)
 
   if (check_for_node(root, "max_tracks")) {
     settings::max_tracks = std::stoi(get_node_value(root, "max_tracks"));
+  }
+  
+  if (check_for_node(root, "endpoint_track")) {
+    write_all_endpoints = true;
+    xml_node node_ep = root.child("endpoint_track");
+
+    if (check_for_node(node_ep, "fission_only"))
+      endpoint_fission_only = get_node_value_bool(node_ep, "fission_only");
+    if (check_for_node(node_ep, "collisions"))
+      endpoint_collisions = get_node_value_bool(node_ep, "collisions");
+    if (check_for_node(node_ep, "max_tracks"))
+      max_endpoint_tracks = std::stoll(get_node_value(node_ep, "max_tracks"));
   }
 
   // Create weight window generator objects

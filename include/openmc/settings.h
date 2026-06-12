@@ -204,6 +204,11 @@ extern "C" int verbosity;          //!< How verbose to make output
 extern double weight_cutoff;       //!< Weight cutoff for Russian roulette
 extern double weight_survive;      //!< Survival weight after Russian roulette
 
+extern bool write_all_endpoints;     //!< record neutron endpoints
+extern bool endpoint_fission_only;   //!< keep only fission-death neutrons
+extern bool endpoint_collisions;     //!< also record collision states
+extern int64_t max_endpoint_tracks;  //!< per-rank cap on source particles
+
 } // namespace settings
 
 //==============================================================================

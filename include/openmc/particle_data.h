@@ -94,6 +94,14 @@ struct TrackStateHistory {
   std::vector<TrackState> states;
 };
 
+//! One recorded neutron history for the endpoint-track feature.
+struct EndpointHistory {
+  ParticleType particle;        //!< neutron (only type recorded for now)
+  bool fission_death {false};   //!< terminal event was a fission
+  bool open {true};             //!< still accepting states (birth..death)
+  vector<TrackState> states;    //!< [birth, (collisions...), death]
+};
+
 //! Saved ("banked") state of a particle, for nu-fission tallying
 struct NuBank {
   double E;          //!< particle energy
@@ -550,6 +558,11 @@ private:
   vector<FilterMatch> filter_matches_;
 
   vector<TrackStateHistory> tracks_;
+  
+  // Endpoint-track state
+  vector<EndpointHistory> endpoint_tracks_;
+  bool write_endpoints_ {false};   //!< this source particle is being recorded
+  bool fission_death_ {false};     //!< set by physics when killed via fission
 
   vector<NuBank> nu_bank_;
 
@@ -730,6 +743,12 @@ public:
 
   // Tracks to output to file
   decltype(tracks_)& tracks() { return tracks_; }
+  
+  vector<EndpointHistory>& endpoint_tracks() { return endpoint_tracks_; }
+  bool& write_endpoints() { return write_endpoints_; }
+  const bool& write_endpoints() const { return write_endpoints_; }
+  bool& fission_death() { return fission_death_; }
+  const bool& fission_death() const { return fission_death_; }
 
   // Bank of recently fissioned particles
   decltype(nu_bank_)& nu_bank() { return nu_bank_; }

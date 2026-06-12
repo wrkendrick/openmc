@@ -9,6 +9,7 @@
 #include "openmc/capi.h"
 #include "openmc/cell.h"
 #include "openmc/collision_track.h"
+#include "openmc/endpoint_track.h"
 #include "openmc/constants.h"
 #include "openmc/dagmc.h"
 #include "openmc/error.h"
@@ -152,6 +153,7 @@ void Particle::from_source(const SourceSite* src)
   material() = C_NONE;
   n_collision() = 0;
   fission() = false;
+  fission_death() = false;
   zero_flux_derivs();
   lifetime() = 0.0;
 #ifdef OPENMC_DAGMC_ENABLED
@@ -234,6 +236,8 @@ void Particle::event_calculate_xs()
   // Write particle track.
   if (write_track())
     write_particle_track(*this);
+  if (settings::write_all_endpoints)
+    record_endpoint_birth(*this);
 
   if (settings::check_overlaps)
     check_cell_overlap(*this);
@@ -410,6 +414,12 @@ void Particle::event_collide()
   if (settings::collision_track) {
     collision_track_record(*this);
   }
+  
+  // Endpoint tracking: record an intermediate collision site. The terminal     
+  // collision of a particle that just died is skipped here and captured        
+  // instead as the death state.                                                
+  if (settings::write_all_endpoints && alive())                                 
+    record_endpoint_collision(*this); 
 
   // Score collision estimator tallies -- this is done after a collision
   // has occurred rather than before because we need information on the
@@ -480,6 +490,9 @@ void Particle::event_revive_from_secondary(const SourceSite& site)
   if (write_track() && n_event() > 0) {
     write_particle_track(*this);
   }
+  if (settings::write_all_endpoints) {
+    record_endpoint_terminal(*this);
+  }
 
   from_source(&site);
 
@@ -520,6 +533,8 @@ void Particle::event_revive_from_secondary(const SourceSite& site)
   // Enter new particle in particle track file
   if (write_track())
     add_particle_track(*this);
+  if (settings::write_all_endpoints)
+    add_endpoint_track(*this);
 }
 
 void Particle::event_check_limit_and_revive()
@@ -552,6 +567,8 @@ void Particle::event_death()
     write_particle_track(*this);
     finalize_particle_track(*this);
   }
+  if (settings::write_all_endpoints) 
+    finalize_endpoint_track(*this);
 
 // Contribute tally reduction variables to global accumulator
 #pragma omp atomic

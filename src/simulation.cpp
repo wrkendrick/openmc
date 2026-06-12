@@ -26,6 +26,7 @@
 #include "openmc/timer.h"
 #include "openmc/track_output.h"
 #include "openmc/weight_windows.h"
+#include "openmc/endpoint_track.h"
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -95,6 +96,9 @@ int openmc_simulation_init()
   if (!settings::track_identifiers.empty() || settings::write_all_tracks) {
     open_track_file();
   }
+  
+  if (settings::write_all_endpoints)
+    open_endpoint_file();
 
   // If doing an event-based simulation, intialize the particle buffer
   // and event queues
@@ -188,6 +192,9 @@ int openmc_simulation_finalize()
   if (!settings::track_identifiers.empty() || settings::write_all_tracks) {
     close_track_file();
   }
+  
+  if (settings::write_all_endpoints)
+    close_endpoint_file();
 
   // Increment total number of generations
   simulation::total_gen += simulation::current_batch * settings::gen_per_batch;
@@ -659,6 +666,7 @@ void initialize_particle_track(
 
   // Set particle track.
   p.write_track() = check_track_criteria(p);
+  p.write_endpoints() = check_endpoint_criteria(p);
 
   // Set the particle's initial weight window value.
   if (!is_secondary) {
@@ -685,6 +693,8 @@ void initialize_particle_track(
   // Prepare to write out particle track.
   if (p.write_track())
     add_particle_track(p);
+  if (p.write_endpoints())
+    add_endpoint_track(p); 
 }
 
 int overall_generation()
