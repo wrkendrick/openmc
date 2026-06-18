@@ -29,7 +29,7 @@ class RunMode(Enum):
 
 
 _RES_SCAT_METHODS = {'dbrc', 'rvs'}
-_VALID_ENDPOINT_KEYS = {"fission_only", "collisions", "max_tracks"}
+_VALID_ENDPOINT_KEYS = {"fission_only", "collisions", "max_tracks", "start_batch"}
 
 
 class Settings:
@@ -1513,6 +1513,11 @@ class Settings:
             cv.check_greater_than(
                 "endpoint_track max_tracks", value["max_tracks"], 0
             )
+        if "start_batch" in value:
+            cv.check_type("endpoint_track start_batch", value["start_batch"], Integral)
+            cv.check_greater_than(
+                "endpoint_track start_batch", value["start_batch"], 0
+        )
         self._endpoint_track = value   
     
     @property
@@ -2596,32 +2601,37 @@ class Settings:
             self.free_gas_threshold = float(text)
             
     def _create_endpoint_track_subelement(self, root):
-    	if self._endpoint_track is None:
-        	return
-    	cfg = self._endpoint_track
-    	elem = ET.SubElement(root, "endpoint_track")
-    	sub = ET.SubElement(elem, "fission_only")
-    	sub.text = str(bool(cfg.get("fission_only", False))).lower()
-    	sub = ET.SubElement(elem, "collisions")
-    	sub.text = str(bool(cfg.get("collisions", False))).lower()
-    	sub = ET.SubElement(elem, "max_tracks")
-    	sub.text = str(int(cfg.get("max_tracks", 100000)))
+        if self._endpoint_track is None:
+            return
+        cfg = self._endpoint_track
+        elem = ET.SubElement(root, "endpoint_track")
+        sub = ET.SubElement(elem, "fission_only")
+        sub.text = str(bool(cfg.get("fission_only", False))).lower()
+        sub = ET.SubElement(elem, "collisions")
+        sub.text = str(bool(cfg.get("collisions", False))).lower()
+        sub = ET.SubElement(elem, "max_tracks")
+        sub.text = str(int(cfg.get("max_tracks", 100000)))
+        sub = ET.SubElement(elem, "start_batch")
+        sub.text = str(int(cfg.get("start_batch", 1)))
     	
     def _endpoint_track_from_xml_element(self, root):
-    	elem = root.find("endpoint_track")
-    	if elem is None:
-    	    return
-    	cfg = {}
-    	sub = elem.find("fission_only")
-    	if sub is not None:
+        elem = root.find("endpoint_track")
+        if elem is None:
+            return
+        cfg = {}
+        sub = elem.find("fission_only")
+        if sub is not None:
     	    cfg["fission_only"] = sub.text in ("true", "1")
-    	sub = elem.find("collisions")
-    	if sub is not None:
-    	    cfg["collisions"] = sub.text in ("true", "1")
-    	sub = elem.find("max_tracks")
-    	if sub is not None:
+        sub = elem.find("collisions")
+        if sub is not None:
+            cfg["collisions"] = sub.text in ("true", "1")
+        sub = elem.find("max_tracks")
+        if sub is not None:
     	    cfg["max_tracks"] = int(sub.text)
-    	self.endpoint_track = cfg
+        sub = elem.find("start_batch")
+        if sub is not None:
+            cfg["start_batch"] = int(sub.text)
+        self.endpoint_track = cfg
 
     def to_xml_element(self, mesh_memo=None):
         """Create a 'settings' element to be written to an XML file.

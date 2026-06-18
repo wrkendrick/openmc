@@ -49,13 +49,20 @@ bool check_endpoint_criteria(const Particle& p)
   // Only the "record all (up to a cap)" mode is supported for now. Explicit
   // (batch, gen, particle) selection could be added here in the same way as
   // settings::track_identifiers if desired.
-  if (settings::write_all_endpoints) {
-    int n;
+  if (!settings::write_all_endpoints)
+    return false;
+
+  // Do not start recording until the configured batch. Checked before the
+  // counter is touched so skipped batches don't consume the max_tracks budget.
+  // (current_batch is 1-indexed over all batches; for eigenvalue runs set
+  // endpoint_start_batch = n_inactive + 1 to record active batches only.)
+  if (simulation::current_batch < settings::endpoint_start_batch)
+    return false;
+
+  int n;
 #pragma omp atomic capture
-    n = n_endpoints_written++;
-    return n < settings::max_endpoint_tracks;
-  }
-  return false;
+  n = n_endpoints_written++;
+  return n < settings::max_endpoint_tracks;
 }
 
 void add_endpoint_track(Particle& p)

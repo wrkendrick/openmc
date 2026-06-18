@@ -208,6 +208,7 @@ extern bool write_all_endpoints;     //!< record neutron endpoints
 extern bool endpoint_fission_only;   //!< keep only fission-death neutrons
 extern bool endpoint_collisions;     //!< also record collision states
 extern int64_t max_endpoint_tracks;  //!< per-rank cap on source particles
+extern int  endpoint_start_batch;    //!< begin recording at this batch (1-indexed)
 
 } // namespace settings
 

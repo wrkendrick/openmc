@@ -158,6 +158,7 @@ bool write_all_endpoints {false};
 bool endpoint_fission_only {false};
 bool endpoint_collisions {false};
 int64_t max_endpoint_tracks {100000};
+int endpoint_start_batch {1};
 
 } // namespace settings
 
@@ -1284,6 +1285,8 @@ void read_settings_xml(pugi::xml_node root)
       endpoint_collisions = get_node_value_bool(node_ep, "collisions");
     if (check_for_node(node_ep, "max_tracks"))
       max_endpoint_tracks = std::stoll(get_node_value(node_ep, "max_tracks"));
+    if (check_for_node(node_ep, "start_batch"))
+      endpoint_start_batch = std::stoi(get_node_value(node_ep, "start_batch"));
   }
 
   // Create weight window generator objects
