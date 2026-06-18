@@ -251,22 +251,39 @@ static double default_sample_time = 0;
 static int default_call_count = 0;
 static int notinrange_call_count = 0;
 
+bool is_target_cell(int32_t material_id) {
+  // uncomment for pincell case:
+  static const std::set<int> target_ids = {1};
+  // uncomment for C5G7 assembly case:
+  //static const std::set<int> target_ids = {1, 2, 3, 4};
+  return target_ids.count(material_id) > 0;
+}
+
 void Particle::event_advance()
 {
   // Find the distance to the nearest boundary
   boundary() = distance_to_boundary(*this);
+  //std::cout << model::cells[coord(0).cell()]->id_ << "\n";
 
   // Check if any nuclides are below URR energy threshold.
   //std::cout << "Cell ID: " << model::cells[lowest_coord().cell()]->id_ << "\n";
   //std::cout << "Particle location: " << r() << "\n";
+  int mat_index = this->material();
+  int32_t mat_id;  
+  if (mat_index != MATERIAL_VOID) {  
+    mat_id = model::materials[mat_index]->id_;  
+  }
 
   // Sample a distance to collision
   if (type() == ParticleType::electron || type() == ParticleType::positron) {
     collision_distance() = material() == MATERIAL_VOID ? INFINITY : 0.0;
   } else if (macro_xs().total == 0.0) {
     collision_distance() = INFINITY;
+  // CVMT HERE
   } else if (libmesh::has_solution() && type() == ParticleType::neutron && 
-             model::cells[coord(0).cell()]->id_ == 10) {
+         is_target_cell(mat_id)) {
+  //} else if (libmesh::has_solution() && type() == ParticleType::neutron && 
+  //           model::cells[coord(0).cell()]->id_ == 1) {
     //std::cout << "LEACS SAMPLING\n";
     const std::string fe_method = "LEACS"; // LEACS or CVMT
     collision_distance() = fe_solution_sampling(boundary().distance(), fe_method);
@@ -332,7 +349,7 @@ void Particle::event_advance()
 //-------------------------------------------------------------//
 #ifdef OPENMC_LIBMESH_ENABLED
 
-constexpr int N_SAMPLES = 5;
+constexpr int N_SAMPLES = 7;
 constexpr int N_SEGMENTS = (N_SAMPLES - 1) / 2;
 constexpr int N_TAUS = N_SEGMENTS + 1;
 
@@ -408,6 +425,9 @@ double Particle::fe_solution_sampling(double max_distance, const std::string& me
         fmt::print("  r0 = ({}, {}, {}), dir = ({}, {}, {})\n",
           r0[0], r0[1], r0[2], dir[0], dir[1], dir[2]);
         fmt::print("  material = {}, distance = {}\n", material(), distances[i]);
+        for (int j=0; j<N_SAMPLES; j++) { 
+          fmt::print("  idx={} temp={}\n",j,temperatures[j]);
+        }
       }
     }
 
@@ -611,13 +631,19 @@ double Particle::fe_solution_sampling(double max_distance, const std::string& me
       fmt::print("    T[{}]={} at d={}\n", idx0, temperatures[idx0], distances[idx0]);
       fmt::print("    T[{}]={} at d={}\n", idx0+1, temperatures[idx0+1], distances[idx0+1]);
       fmt::print("    T[{}]={} at d={}\n", idx0+2, temperatures[idx0+2], distances[idx0+2]);
+      /*
+      fmt::print("Temperatures list: \n");
+      for (const auto& val : temperatures) {
+        fmt::print("{}\n",val);
+      }
+      */
     }
 
     sqrtkT() = std::sqrt(K_BOLTZMANN * T_sampled);
     mat->calculate_xs(*this);
 
     return r_sol;
-
+ 
   } else if (method == "CVMT") {
     // TODO: Implement CVMT method
     double xi = prn(current_seed());

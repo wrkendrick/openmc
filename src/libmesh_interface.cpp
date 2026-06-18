@@ -98,7 +98,7 @@ std::unique_ptr<ElemKDTree> elem_kdtree;
 // How many nearest centroids to check for containment.
 // For well-shaped hex/tet meshes, the correct element is almost always
 // among the closest 1-3 centroids. We check a few extras for safety.
-constexpr size_t KNN_CANDIDATES = 1;
+constexpr size_t KNN_CANDIDATES = 10;
 
 // Build the kd-tree from the current mesh
 void build_elem_kdtree()
@@ -141,7 +141,7 @@ const libMesh::Elem* locate_elem_kdtree(const libMesh::Point& p)
   // Check each candidate element for actual containment
   for (size_t k = 0; k < result_set.size(); ++k) {
     const libMesh::Elem* candidate = elem_cloud->entries[ret_indices[k]].elem;
-    if (candidate->contains_point(p)) {
+    if (candidate->contains_point(p,1e-6)) {
       return candidate;
     }
   }
@@ -199,10 +199,15 @@ double sample_impl(const libMesh::Point& p)
     }
 
     if (!elem) {
-      // Fallback to full tree search
-      elem = (*point_locator)(p);
-      ++nanoflann_misses;
+    elem = (*point_locator)(p);
+    if (elem) {
+        ++nanoflann_misses;  // KNN failed but fallback saved it
+    } else {
+        fmt::print("  BOTH locators failed for ({:.6f}, {:.6f}, {:.6f})\n",
+                   p(0), p(1), p(2));
+        //++nanoflann_misses;  // point may genuinely be outside mesh
     }
+}
   } else {
     // No kd-tree built yet, use original locator
     elem = (*point_locator)(p);
@@ -212,8 +217,10 @@ double sample_impl(const libMesh::Point& p)
   time_point_locate += std::chrono::duration<double>(t1 - t0).count();
 
   if (!elem) {
+    fmt::print("  sample_impl: point ({}, {}, {}) not in mesh — returning NaN\n",
+               p(0), p(1), p(2));
     return std::numeric_limits<double>::quiet_NaN();
-  }
+}
 
   auto t2 = Clock::now();
   libMesh::Point ref_point =
@@ -265,7 +272,8 @@ double sample_impl(const libMesh::Point& p)
               << "% hit rate)\n";
     std::cout << "=================================================\n";
   }
-
+  //fmt::print("  value = {}\n", value);
+  
   return value;
 }
 
@@ -397,14 +405,26 @@ std::size_t sample_along_ray(const std::array<Position, N>& positions,
         libMesh::Point(positions[i].x, positions[i].y, positions[i].z));
     if (!std::isnan(temperatures[i])) {
       ++valid_count;
+    } else {
+        fmt::print("  NaN at index {} — position ({}, {}, {})\n",
+                   i, positions[i].x, positions[i].y, positions[i].z);
     }
   }
+  //fmt::print("valid_count:{}\n",valid_count);
   return valid_count;
 }
 
 // Explicit instantiation for N_SAMPLES = 5
 template std::size_t sample_along_ray<5>(const std::array<Position, 5>&,
                                          std::array<double, 5>&);
+template std::size_t sample_along_ray<7>(const std::array<Position, 7>&,
+                                         std::array<double, 7>&);
+template std::size_t sample_along_ray<11>(const std::array<Position, 11>&,
+                                         std::array<double, 11>&);
+template std::size_t sample_along_ray<21>(const std::array<Position, 21>&,
+                                         std::array<double, 21>&);
+template std::size_t sample_along_ray<3>(const std::array<Position, 3>&,
+                                         std::array<double, 3>&);
 
 bool has_solution() { return solution_loaded; }
 
