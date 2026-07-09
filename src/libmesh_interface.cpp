@@ -425,6 +425,14 @@ template std::size_t sample_along_ray<21>(const std::array<Position, 21>&,
                                          std::array<double, 21>&);
 template std::size_t sample_along_ray<3>(const std::array<Position, 3>&,
                                          std::array<double, 3>&);
+template std::size_t sample_along_ray<31>(const std::array<Position, 31>&,
+                                         std::array<double, 31>&);
+template std::size_t sample_along_ray<51>(const std::array<Position, 51>&,
+                                         std::array<double, 51>&);
+template std::size_t sample_along_ray<101>(const std::array<Position, 101>&,
+                                         std::array<double, 101>&);
+template std::size_t sample_along_ray<1001>(const std::array<Position, 1001>&,
+                                         std::array<double, 1001>&);
 
 bool has_solution() { return solution_loaded; }
 

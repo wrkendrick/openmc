@@ -39,6 +39,7 @@
 
 #ifdef OPENMC_LIBMESH_ENABLED
 #include "openmc/libmesh_interface.h"
+#include <fmt/ranges.h>
 //#include "openmc/petsc_fe_sampling.h"
 #include <chrono>
 #endif
@@ -349,7 +350,7 @@ void Particle::event_advance()
 //-------------------------------------------------------------//
 #ifdef OPENMC_LIBMESH_ENABLED
 
-constexpr int N_SAMPLES = 7;
+constexpr int N_SAMPLES = 5;
 constexpr int N_SEGMENTS = (N_SAMPLES - 1) / 2;
 constexpr int N_TAUS = N_SEGMENTS + 1;
 
@@ -528,7 +529,12 @@ double Particle::fe_solution_sampling(double max_distance, const std::string& me
     double tau_sample = -std::log(1.0 - (1.0 - P_NoCollision) * xi_2);
 
     // Find segment containing tau_sample
-    int seg = (tau_sample <= taus[1]) ? 0 : 1;
+    int seg;
+    {
+      auto it = std::upper_bound(taus.begin(), taus.end(), tau_sample);
+      seg = std::max(0, static_cast<int>(std::distance(taus.begin(), it)) - 1);
+      if (seg >= N_TAUS - 1) seg = N_TAUS - 2;  // clamp last segment
+    }
 
     int idx = 2 * seg;
     int coeff_idx = 3 * seg;
@@ -637,6 +643,29 @@ double Particle::fe_solution_sampling(double max_distance, const std::string& me
         fmt::print("{}\n",val);
       }
       */
+    }
+
+    if (LEACS_DEBUG_MODE) {
+      fmt::print("--- LEACS SAMPLES AND RESULTS ---\n");
+      fmt::print("---        N_SAMPLES={}        ---\n",N_SAMPLES);
+      fmt::print("---------------------------------\n");
+      fmt::print("  position init={}\n",positions[0]);
+      fmt::print("  Sig_t init={}\n",sigma_t);
+      fmt::print("  s_b={}\n",max_distance);
+      fmt::print("  xi_2={}\n",xi_2);
+      fmt::print("  tau_sampled={}\n",tau_sample);
+      fmt::print("---------------------------------\n");
+      //for (size_t ix=0; ix < temperatures.size(); ++ix) {
+      //  fmt::print("  i={} || s={}, T={}, Sig_t={}, tau={}\n",ix,distances[ix],temperatures[ix],Sig_Ts[ix],taus[ix]);
+      //}
+      //fmt::print("distances    = [{}]\n", fmt::join(distances,    ", "));
+      //fmt::print("temperatures = [{}]\n", fmt::join(temperatures, ", "));
+      //fmt::print("Sig_t        = [{}]\n", fmt::join(Sig_Ts,       ", "));
+      //fmt::print("tau          = [{}]\n", fmt::join(taus,         ", "));
+      //fmt::print("---------------------------------\n");
+      fmt::print("  s_solution={}\n",r_sol);
+      fmt::print("  T_solution={}\n",T_sampled);
+      fmt::print("---------------------------------\n");
     }
 
     sqrtkT() = std::sqrt(K_BOLTZMANN * T_sampled);
