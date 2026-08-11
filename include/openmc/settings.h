@@ -71,6 +71,7 @@ extern "C" bool entropy_on; //!< calculate Shannon entropy?
 extern "C" bool
   event_based;      //!< use event-based mode (instead of history-based)
 extern bool ifp_on; //!< Use IFP for kinetics parameters?
+extern bool kij_on; //!< Compute region-to-region fission matrix (k_ij)?
 extern bool legendre_to_tabular; //!< convert Legendre distributions to tabular?
 extern bool material_cell_offsets;   //!< create material cells offsets?
 extern "C" bool output_summary;      //!< write summary.h5?
@@ -148,6 +149,12 @@ extern int
   ifp_n_generation; //!< Number of generation for Iterated Fission Probability
 extern IFPParameter
   ifp_parameter; //!< Parameter to calculate for Iterated Fission Probability
+extern int64_t kij_i_filter; //!< Index of the k_ij "i" (current position)
+                              //!< filter in model::tally_filters
+extern int64_t
+  kij_j_filter; //!< Index of the k_ij "j" (birth region) filter
+extern int64_t kij_d_filter; //!< Index of the k_dij delayed-group-born
+                              //!< filter, or -1 if k_dij is not requested
 extern int
   legendre_to_tabular_points; //!< number of points to convert Legendres
 extern int max_order;         //!< Maximum Legendre order for multigroup data

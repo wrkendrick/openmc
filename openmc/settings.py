@@ -13,6 +13,8 @@ import openmc.checkvalue as cv
 from openmc.checkvalue import PathLike
 from openmc.stats.multivariate import MeshSpatial
 from ._xml import clean_indentation, get_elem_list, get_text
+from .filter import (Filter, CellFilter, MeshFilter, CellBornFilter,
+                      MeshBornFilter, DelayedGroupBornFilter)
 from .mesh import _read_meshes, RegularMesh, MeshBase
 from .source import SourceBase, MeshSource, IndependentSource
 from .utility_funcs import input_path, set_xml_input_path
@@ -117,6 +119,20 @@ class Settings:
     ifp_n_generation : int
         Number of generations to consider for the Iterated Fission Probability
         method.
+    fission_matrix_i_filter : openmc.CellFilter or openmc.MeshFilter
+        Filter defining the "i" (fission production) regions of the k_ij /
+        k_dij region-to-region fission matrix.
+    fission_matrix_j_filter : openmc.CellBornFilter or openmc.MeshBornFilter
+        Filter defining the "j" (birth) regions of the k_ij / k_dij fission
+        matrix. Must be the matching "*born" counterpart of
+        ``fission_matrix_i_filter`` (a :class:`~openmc.CellBornFilter` if
+        ``fission_matrix_i_filter`` is a :class:`~openmc.CellFilter`, or a
+        :class:`~openmc.MeshBornFilter` if it is a :class:`~openmc.MeshFilter`).
+    fission_matrix_d_filter : openmc.DelayedGroupBornFilter
+        Optional filter resolving the fission matrix by the delayed neutron
+        precursor family the source particle was itself born as, producing
+        k_dij in addition to k_ij. If not set, only the (family-aggregated)
+        k_ij matrix is computed.
     max_lost_particles : int
         Maximum number of lost particles
 
@@ -445,6 +461,11 @@ class Settings:
 
         # Iterated Fission Probability
         self._ifp_n_generation = None
+
+        # Region-to-region fission matrix (k_ij / k_dij)
+        self._fission_matrix_i_filter = None
+        self._fission_matrix_j_filter = None
+        self._fission_matrix_d_filter = None
 
         # Collision track feature
         self._collision_track = {}
@@ -1038,6 +1059,42 @@ class Settings:
             cv.check_type("number of generations", ifp_n_generation, Integral)
             cv.check_greater_than("number of generations", ifp_n_generation, 0)
         self._ifp_n_generation = ifp_n_generation
+
+    @property
+    def fission_matrix_i_filter(self):
+        return self._fission_matrix_i_filter
+
+    @fission_matrix_i_filter.setter
+    def fission_matrix_i_filter(self, i_filter):
+        cv.check_type('fission_matrix_i_filter', i_filter, Filter)
+        if type(i_filter) not in (CellFilter, MeshFilter):
+            raise TypeError(
+                'fission_matrix_i_filter must be a CellFilter or MeshFilter, '
+                f'not a {type(i_filter).__name__}')
+        self._fission_matrix_i_filter = i_filter
+
+    @property
+    def fission_matrix_j_filter(self):
+        return self._fission_matrix_j_filter
+
+    @fission_matrix_j_filter.setter
+    def fission_matrix_j_filter(self, j_filter):
+        cv.check_type('fission_matrix_j_filter', j_filter, Filter)
+        if type(j_filter) not in (CellBornFilter, MeshBornFilter):
+            raise TypeError(
+                'fission_matrix_j_filter must be a CellBornFilter or '
+                f'MeshBornFilter, not a {type(j_filter).__name__}')
+        self._fission_matrix_j_filter = j_filter
+
+    @property
+    def fission_matrix_d_filter(self):
+        return self._fission_matrix_d_filter
+
+    @fission_matrix_d_filter.setter
+    def fission_matrix_d_filter(self, d_filter):
+        cv.check_type('fission_matrix_d_filter', d_filter,
+                       DelayedGroupBornFilter)
+        self._fission_matrix_d_filter = d_filter
 
     @property
     def tabular_legendre(self) -> dict:
@@ -1798,6 +1855,48 @@ class Settings:
             element = ET.SubElement(root, "ifp_n_generation")
             element.text = str(self._ifp_n_generation)
 
+    def _create_fission_matrix_subelement(self, root, mesh_memo=None):
+        i_filter = self._fission_matrix_i_filter
+        j_filter = self._fission_matrix_j_filter
+        if i_filter is None and j_filter is None:
+            return
+        if i_filter is None or j_filter is None:
+            raise ValueError(
+                'Both fission_matrix_i_filter and fission_matrix_j_filter '
+                'must be set to compute the k_ij fission matrix.')
+
+        if isinstance(i_filter, CellFilter) and not isinstance(
+                j_filter, CellBornFilter):
+            raise ValueError(
+                'fission_matrix_j_filter must be a CellBornFilter when '
+                'fission_matrix_i_filter is a CellFilter.')
+        if isinstance(i_filter, MeshFilter) and not isinstance(
+                j_filter, MeshBornFilter):
+            raise ValueError(
+                'fission_matrix_j_filter must be a MeshBornFilter when '
+                'fission_matrix_i_filter is a MeshFilter.')
+
+        element = ET.SubElement(root, "fission_matrix")
+        element.append(i_filter.to_xml_element())
+        element.append(j_filter.to_xml_element())
+        if self._fission_matrix_d_filter is not None:
+            element.append(self._fission_matrix_d_filter.to_xml_element())
+
+        # If either filter is mesh-based, the referenced mesh must also be
+        # written directly under <settings> (mirrors
+        # _create_entropy_mesh_subelement) since settings.xml is parsed
+        # before tallies.xml and so cannot rely on a mesh defined there.
+        for f in (i_filter, j_filter):
+            if isinstance(f, MeshFilter):
+                mesh = f.mesh
+                if mesh_memo is not None and mesh.id in mesh_memo:
+                    continue
+                path = f"./mesh[@id='{mesh.id}']"
+                if root.find(path) is None:
+                    root.append(mesh.to_xml_element())
+                    if mesh_memo is not None:
+                        mesh_memo.add(mesh.id)
+
     def _create_tabular_legendre_subelements(self, root):
         if self.tabular_legendre:
             element = ET.SubElement(root, "tabular_legendre")
@@ -2328,6 +2427,19 @@ class Settings:
         if text is not None:
             self.ifp_n_generation = int(text)
 
+    def _fission_matrix_from_xml_element(self, root, meshes=None):
+        elem = root.find('fission_matrix')
+        if elem is None:
+            return
+
+        filter_elems = elem.findall('filter')
+        parsed = [Filter.from_xml_element(e, meshes=meshes)
+                  for e in filter_elems]
+        self.fission_matrix_i_filter = parsed[0]
+        self.fission_matrix_j_filter = parsed[1]
+        if len(parsed) == 3:
+            self.fission_matrix_d_filter = parsed[2]
+
     def _tabular_legendre_from_xml_element(self, root):
         elem = root.find('tabular_legendre')
         if elem is not None:
@@ -2607,6 +2719,7 @@ class Settings:
         self._create_no_reduce_subelement(element)
         self._create_verbosity_subelement(element)
         self._create_ifp_n_generation_subelement(element)
+        self._create_fission_matrix_subelement(element, mesh_memo)
         self._create_tabular_legendre_subelements(element)
         self._create_temperature_subelements(element)
         self._create_properties_file_element(element)
@@ -2726,6 +2839,7 @@ class Settings:
         settings._no_reduce_from_xml_element(elem)
         settings._verbosity_from_xml_element(elem)
         settings._ifp_n_generation_from_xml_element(elem)
+        settings._fission_matrix_from_xml_element(elem, meshes)
         settings._tabular_legendre_from_xml_element(elem)
         settings._temperature_from_xml_element(elem)
         settings._properties_file_from_xml_element(elem)

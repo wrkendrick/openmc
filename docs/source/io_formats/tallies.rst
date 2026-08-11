@@ -143,8 +143,9 @@ attributes/sub-elements:
   :type:
     The type of the filter. Accepted options are "cell", "cellfrom",
     "cellborn", "surface", "material", "universe", "energy", "energyout",
-    "mu", "polar", "azimuthal", "mesh", "distribcell", "delayedgroup",
-    "energyfunction", "particle", and "particleproduction".
+    "mu", "polar", "azimuthal", "mesh", "meshborn", "distribcell",
+    "delayedgroup", "delayedgroupborn", "energyfunction", "particle", and
+    "particleproduction".
 
   :bins:
      A description of the bins for each type of filter can be found in
@@ -312,6 +313,18 @@ should be set to:
   .. code-block:: xml
 
       <filter type="delayedgroup" bins="1 2 3 4 5 6" />
+
+:delayedgroupborn:
+  A list of delayed neutron precursor group values (0 for prompt, 1-6 for
+  ENDF/B-VII.1) that bins the currently transporting particle by the family
+  it was itself born as -- unlike ``delayedgroup``, which bins newly
+  produced fission progeny by the family they are being born into. Used to
+  define the family (``d``) dimension of the region-to-region fission
+  matrix (see :ref:`kinetics`):
+
+  .. code-block:: xml
+
+      <filter type="delayedgroupborn" bins="0 1 2 3 4 5 6" />
 
 :energyfunction:
   ``energyfunction`` filters do not use the ``bins`` entry.  Instead

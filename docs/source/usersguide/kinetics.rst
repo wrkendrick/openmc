@@ -118,6 +118,65 @@ the :meth:`openmc.StatePoint.ifp_results` method::
     with openmc.StatePoint(output_path) as sp:
         generation_time, beta_eff = sp.get_kinetics_parameters()
 
+----------------------------------------------
+Region-to-region fission matrix (k_ij / k_dij)
+----------------------------------------------
+
+For multipoint-kinetics analyses of loosely-coupled or spatially extended
+systems, OpenMC can additionally estimate a stochastic, region-to-region
+fission matrix following the analog Monte Carlo estimators described by
+Tommasi, Aufiero, and Vicoli. :math:`k_{ij}` is the average number of
+fission neutrons produced in region :math:`i` by a neutron born in region
+:math:`j`. :math:`k_{d,ij}` further resolves this quantity by delayed
+neutron precursor family :math:`d` (family 0 denotes prompt neutrons),
+which is needed to obtain family-resolved effective lifetimes and
+sensitivity coefficients for multipoint kinetics.
+
+Both quantities are estimated on a per-generation basis, exactly like
+OpenMC's k-effective generation estimators: for each active generation
+:math:`n`,
+
+.. math::
+
+    k_{ij}^{(n)} = \frac{p_{ij}^{(n)}}{s_j^{(n)}}
+
+where :math:`s_j^{(n)}` is the total starting weight of source particles
+born in region :math:`j` at the start of generation :math:`n`, and
+:math:`p_{ij}^{(n)}` is the total weight of new fission neutrons produced
+in region :math:`i` during generation :math:`n` by particles born in region
+:math:`j`. The reported mean and variance are the sample mean and variance
+of :math:`k_{ij}^{(n)}` across active generations,
+:math:`E[k_{ij}] = \frac{1}{N}\sum_n k_{ij}^{(n)}` and
+:math:`\text{Var}(k_{ij}) = E[(k_{ij}^{(n)})^2] - E[k_{ij}]^2`.
+
+Regions :math:`i` and :math:`j` are defined using a matched pair of spatial
+filters -- either :class:`openmc.CellFilter`/:class:`openmc.CellBornFilter`
+for discrete cell-based regions, or :class:`openmc.MeshFilter`/
+:class:`openmc.MeshBornFilter` for spatially-discretized mesh-based
+regions -- assigned to :attr:`openmc.Settings.fission_matrix_i_filter` and
+:attr:`openmc.Settings.fission_matrix_j_filter`. The delayed-family
+resolution for :math:`k_{d,ij}` is optional and enabled by additionally
+setting :attr:`openmc.Settings.fission_matrix_d_filter` to a
+:class:`openmc.DelayedGroupBornFilter`::
+
+    cell_a = openmc.Cell(...)
+    cell_b = openmc.Cell(...)
+
+    settings.fission_matrix_i_filter = openmc.CellFilter([cell_a, cell_b])
+    settings.fission_matrix_j_filter = openmc.CellBornFilter([cell_a, cell_b])
+
+    # Optional: also resolve by delayed neutron precursor family (0 = prompt)
+    settings.fission_matrix_d_filter = openmc.DelayedGroupBornFilter(range(7))
+
+This feature is only available in k-eigenvalue calculations. The resulting
+matrices can be read back from a statepoint file::
+
+    with openmc.StatePoint(output_path) as sp:
+        kij_mean = sp.kij_mean          # shape (n_i, n_j)
+        kij_std_dev = sp.kij_std_dev
+        kdij_mean = sp.kdij_mean        # shape (n_i, n_j, n_d), if requested
+        kdij_std_dev = sp.kdij_std_dev
+
 .. only:: html
 
    .. rubric:: References

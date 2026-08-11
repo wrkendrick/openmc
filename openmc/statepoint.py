@@ -310,6 +310,43 @@ class StatePoint:
             return None
 
     @property
+    def kij_mean(self):
+        """numpy.ndarray or None : Mean of the k_ij region-to-region fission
+        matrix, shape (n_i, n_j), or None if k_ij was not computed."""
+        if self.run_mode == 'eigenvalue' and 'kij_mean' in self._f:
+            return self._f['kij_mean'][()]
+        else:
+            return None
+
+    @property
+    def kij_std_dev(self):
+        """numpy.ndarray or None : Standard deviation of the mean of k_ij,
+        shape (n_i, n_j), or None if k_ij was not computed."""
+        if self.run_mode == 'eigenvalue' and 'kij_std_dev' in self._f:
+            return self._f['kij_std_dev'][()]
+        else:
+            return None
+
+    @property
+    def kdij_mean(self):
+        """numpy.ndarray or None : Mean of the delayed-group-resolved k_dij
+        fission matrix, shape (n_i, n_j, n_d), or None if k_dij was not
+        requested."""
+        if self.run_mode == 'eigenvalue' and 'kdij_mean' in self._f:
+            return self._f['kdij_mean'][()]
+        else:
+            return None
+
+    @property
+    def kdij_std_dev(self):
+        """numpy.ndarray or None : Standard deviation of the mean of k_dij,
+        shape (n_i, n_j, n_d), or None if k_dij was not requested."""
+        if self.run_mode == 'eigenvalue' and 'kdij_std_dev' in self._f:
+            return self._f['kdij_std_dev'][()]
+        else:
+            return None
+
+    @property
     def meshes(self):
         if not self._meshes_read:
             mesh_group = self._f['tallies/meshes']

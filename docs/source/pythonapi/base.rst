@@ -141,6 +141,7 @@ Constructing Tallies
    openmc.AzimuthalFilter
    openmc.DistribcellFilter
    openmc.DelayedGroupFilter
+   openmc.DelayedGroupBornFilter
    openmc.EnergyFunctionFilter
    openmc.LegendreFilter
    openmc.SpatialLegendreFilter

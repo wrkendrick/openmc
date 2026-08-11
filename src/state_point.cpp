@@ -15,6 +15,7 @@
 #include "openmc/error.h"
 #include "openmc/file_utils.h"
 #include "openmc/hdf5_interface.h"
+#include "openmc/kij.h"
 #include "openmc/mcpl_interface.h"
 #include "openmc/mesh.h"
 #include "openmc/message_passing.h"
@@ -126,6 +127,10 @@ extern "C" int openmc_statepoint_write(const char* filename, bool* write_source)
     // Write out information for eigenvalue run
     if (settings::run_mode == RunMode::EIGENVALUE)
       write_eigenvalue_hdf5(file_id);
+
+    // Write region-to-region fission matrix (k_ij / k_dij) results
+    if (settings::kij_on)
+      write_kij_hdf5(file_id);
 
     hid_t tallies_group = create_group(file_id, "tallies");
 
@@ -468,6 +473,10 @@ extern "C" int openmc_statepoint_load(const char* filename)
   if (settings::run_mode == RunMode::EIGENVALUE) {
     read_dataset(file_id, "n_inactive", temp);
     read_eigenvalue_hdf5(file_id);
+
+    // Read region-to-region fission matrix (k_ij / k_dij) results
+    if (settings::kij_on)
+      read_kij_hdf5(file_id);
 
     // Take maximum of statepoint n_inactive and input n_inactive
     settings::n_inactive = std::max(settings::n_inactive, temp);

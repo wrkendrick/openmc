@@ -9,6 +9,7 @@
 #include "openmc/event.h"
 #include "openmc/geometry_aux.h"
 #include "openmc/ifp.h"
+#include "openmc/kij.h"
 #include "openmc/material.h"
 #include "openmc/message_passing.h"
 #include "openmc/nuclide.h"
@@ -462,6 +463,11 @@ void allocate_banks()
     if (settings::ifp_on) {
       resize_simulation_ifp_banks();
     }
+
+    // Allocate region-to-region fission matrix (k_ij / k_dij) accumulators
+    if (settings::kij_on) {
+      init_kij_tallies();
+    }
   }
 
   if (settings::surf_source_write) {
@@ -635,6 +641,12 @@ void initialize_generation()
     // Store current value of tracklength k
     simulation::keff_generation = simulation::global_tallies(
       GlobalTally::K_TRACKLENGTH, TallyResult::VALUE);
+
+    // Clear the region-to-region fission matrix (k_ij / k_dij)
+    // per-generation accumulators
+    if (settings::kij_on) {
+      clear_kij_generation();
+    }
   }
 }
 
@@ -681,6 +693,12 @@ void finalize_generation()
     // Collect results and statistics
     calculate_generation_keff();
     calculate_average_keff();
+
+    // Region-to-region fission matrix (k_ij / k_dij)
+    if (settings::kij_on) {
+      calculate_generation_kij();
+      calculate_average_kij();
+    }
 
     // Write generation output
     if (mpi::master && settings::verbosity >= 7) {

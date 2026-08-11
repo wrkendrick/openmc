@@ -14,6 +14,7 @@
 #include "openmc/error.h"
 #include "openmc/geometry.h"
 #include "openmc/hdf5_interface.h"
+#include "openmc/kij.h"
 #include "openmc/lattice.h"
 #include "openmc/material.h"
 #include "openmc/message_passing.h"
@@ -225,8 +226,19 @@ void Particle::event_calculate_xs()
     }
 
     // Set birth cell attribute
-    if (cell_born() == C_NONE)
+    if (cell_born() == C_NONE) {
       cell_born() = lowest_coord().cell();
+
+      // Region-to-region fission matrix (k_ij / k_dij): score this
+      // particle's starting weight into the s_j/s_dj denominator. This
+      // fires exactly once per primary source particle per generation --
+      // fission secondaries in eigenvalue mode are routed to the shared
+      // fission bank rather than re-entering via from_source().
+      if (settings::kij_on && settings::run_mode == RunMode::EIGENVALUE &&
+          type() == ParticleType::neutron()) {
+        accumulate_kij_source_particle(*this);
+      }
+    }
 
     // Initialize last cells from current cell
     for (int j = 0; j < n_coord(); ++j) {

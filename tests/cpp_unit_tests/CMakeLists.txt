@@ -11,6 +11,7 @@ set(TEST_NAMES
   test_region
   test_tensor
   test_geometry
+  test_kij
   # Add additional unit test files here
 )
 

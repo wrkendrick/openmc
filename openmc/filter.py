@@ -24,7 +24,7 @@ from ._xml import get_elem_list, get_text
 _FILTER_TYPES = (
     'universe', 'material', 'cell', 'cellborn', 'surface', 'mesh', 'energy',
     'energyout', 'mu', 'musurface', 'polar', 'azimuthal', 'distribcell',
-    'delayedgroup', 'energyfunction', 'cellfrom', 'materialfrom', 'legendre',
+    'delayedgroup', 'delayedgroupborn', 'energyfunction', 'cellfrom', 'materialfrom', 'legendre',
     'spatiallegendre', 'sphericalharmonics', 'zernike', 'zernikeradial', 'particle',
     'particleproduction', 'cellinstance', 'collision', 'time', 'parentnuclide',
     'weight', 'meshborn', 'meshsurface', 'meshmaterial', 'reaction',
@@ -2557,6 +2557,43 @@ class DelayedGroupFilter(Filter):
         # Check the bin values.
         for g in bins:
             cv.check_greater_than('delayed group', g, 0)
+
+
+class DelayedGroupBornFilter(Filter):
+    """Bins particles by the delayed group they were themselves born into.
+
+    Unlike :class:`DelayedGroupFilter`, which bins newly-produced fission
+    neutrons by the precursor group they are being born into, this filter
+    bins the *currently transporting* particle by the precursor group it was
+    itself born as. A bin value of 0 denotes a prompt (non-delayed) particle.
+
+    Parameters
+    ----------
+    bins : iterable of int
+        The delayed neutron precursor groups the particle may have been born
+        into, plus 0 for prompt. For example, ENDF/B-VII.1 uses 6 precursor
+        groups so a tally with all groups will have bins = [0, 1, 2, 3, 4, 5,
+        6].
+    filter_id : int
+        Unique identifier for the filter
+
+    Attributes
+    ----------
+    bins : iterable of int
+        The delayed neutron precursor groups the particle may have been born
+        into, plus 0 for prompt.
+    id : int
+        Unique identifier for the filter
+    num_bins : Integral
+        The number of filter bins
+
+    """
+
+    def check_bins(self, bins):
+        # Check the bin values. Unlike DelayedGroupFilter, 0 (prompt) is a
+        # valid bin here.
+        for g in bins:
+            cv.check_greater_than('birth delayed group', g, 0, equality=True)
 
 
 class EnergyFunctionFilter(Filter):

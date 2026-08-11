@@ -9,6 +9,7 @@
 #include "openmc/endf.h"
 #include "openmc/error.h"
 #include "openmc/ifp.h"
+#include "openmc/kij.h"
 #include "openmc/material.h"
 #include "openmc/math_functions.h"
 #include "openmc/message_passing.h"
@@ -252,6 +253,11 @@ void create_fission_sites(Particle& p, int i_nuclide, const Reaction& rx)
       // Iterated Fission Probability (IFP) method
       if (settings::ifp_on) {
         ifp(p, idx);
+      }
+
+      // Region-to-region fission matrix (k_ij / k_dij)
+      if (settings::kij_on) {
+        accumulate_kij_fission_site(p, site);
       }
     } else {
       site.wgt_born = p.wgt_born();

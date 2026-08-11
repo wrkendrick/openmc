@@ -47,6 +47,20 @@ The current version of the statepoint file format is 18.2.
              absorption/track-length estimates of k-effective.
            - **k_combined** (*double[2]*) -- Mean and standard deviation of a
              combined estimate of k-effective.
+           - **kij_mean** (*double[][]*) -- Mean of the region-to-region
+             fission matrix :math:`k_{ij}`, shape (n_i, n_j). Only present
+             when ``<fission_matrix>`` is specified in settings.xml.
+           - **kij_std_dev** (*double[][]*) -- Standard deviation of the mean
+             of :math:`k_{ij}`, shape (n_i, n_j). Only present when
+             ``<fission_matrix>`` is specified in settings.xml.
+           - **kdij_mean** (*double[][][]*) -- Mean of the delayed-family-
+             resolved fission matrix :math:`k_{d,ij}`, shape (n_i, n_j, n_d).
+             Only present when ``<fission_matrix>`` includes a third
+             (delayed group born) filter.
+           - **kdij_std_dev** (*double[][][]*) -- Standard deviation of the
+             mean of :math:`k_{d,ij}`, shape (n_i, n_j, n_d). Only present
+             when ``<fission_matrix>`` includes a third (delayed group born)
+             filter.
            - **n_realizations** (*int*) -- Number of realizations for global
              tallies.
            - **global_tallies** (*double[][2]*) -- Accumulated sum and

@@ -31,6 +31,7 @@
 #include "openmc/simulation.h"
 #include "openmc/source.h"
 #include "openmc/string_utils.h"
+#include "openmc/tallies/filter.h"
 #include "openmc/tallies/trigger.h"
 #include "openmc/volume_calc.h"
 #include "openmc/weight_windows.h"
@@ -56,6 +57,7 @@ bool delayed_photon_scaling {true};
 bool entropy_on {false};
 bool event_based {false};
 bool ifp_on {false};
+bool kij_on {false};
 bool legendre_to_tabular {true};
 bool material_cell_offsets {true};
 bool output_summary {true};
@@ -115,6 +117,9 @@ array<double, 4> energy_cutoff {0.0, 1000.0, 0.0, 0.0};
 array<double, 4> time_cutoff {INFTY, INFTY, INFTY, INFTY};
 int ifp_n_generation {-1};
 IFPParameter ifp_parameter {IFPParameter::None};
+int64_t kij_i_filter {-1};
+int64_t kij_j_filter {-1};
+int64_t kij_d_filter {-1};
 int legendre_to_tabular_points {C_NONE};
 int max_order {0};
 int n_log_bins {8000};
@@ -575,6 +580,57 @@ void read_settings_xml(pugi::xml_node root)
         fatal_error("'ifp_n_generation' must be lower than or equal to the "
                     "number of inactive cycles.");
       }
+    }
+
+    // Check for a region-to-region fission matrix (k_ij / k_dij) request
+    if (check_for_node(root, "fission_matrix")) {
+      if (run_mode != RunMode::EIGENVALUE) {
+        fatal_error(
+          "<fission_matrix> is only supported in k-eigenvalue mode.");
+      }
+
+      xml_node node_kij = root.child("fission_matrix");
+
+      vector<Filter*> kij_filters;
+      for (auto node_filt : node_kij.children("filter")) {
+        kij_filters.push_back(Filter::create(node_filt));
+      }
+
+      if (kij_filters.size() != 2 && kij_filters.size() != 3) {
+        fatal_error("<fission_matrix> must contain exactly two <filter> "
+                    "elements (i, j) or three (i, j, d).");
+      }
+
+      Filter* i_filter = kij_filters[0];
+      Filter* j_filter = kij_filters[1];
+
+      bool i_is_cell = i_filter->type() == FilterType::CELL;
+      bool i_is_mesh = i_filter->type() == FilterType::MESH;
+      if (!i_is_cell && !i_is_mesh) {
+        fatal_error("The first <filter> in <fission_matrix> (region i) "
+                    "must be a 'cell' or 'mesh' filter.");
+      }
+      if ((i_is_cell && j_filter->type() != FilterType::CELLBORN) ||
+          (i_is_mesh && j_filter->type() != FilterType::MESHBORN)) {
+        fatal_error("The second <filter> in <fission_matrix> (region j) "
+                    "must be the matching '*born' counterpart of the first "
+                    "filter's type ('cellborn' for 'cell', 'meshborn' for "
+                    "'mesh').");
+      }
+
+      kij_i_filter = i_filter->index();
+      kij_j_filter = j_filter->index();
+
+      if (kij_filters.size() == 3) {
+        Filter* d_filter = kij_filters[2];
+        if (d_filter->type() != FilterType::DELAYED_GROUP_BORN) {
+          fatal_error("The third <filter> in <fission_matrix> (delayed "
+                      "group d) must be a 'delayedgroupborn' filter.");
+        }
+        kij_d_filter = d_filter->index();
+      }
+
+      kij_on = true;
     }
   }
 

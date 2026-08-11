@@ -304,6 +304,30 @@ consider for the Iterated Fission Probability method.
 
   *Default*: 10
 
+----------------------------
+``<fission_matrix>`` Element
+----------------------------
+
+The ``<fission_matrix>`` element requests calculation of the region-to-region
+fission matrix (:math:`k_{ij}` / :math:`k_{d,ij}`) described in
+:ref:`kinetics`. It is only valid for k-eigenvalue calculations and contains
+two or three ``<filter>`` child elements (using the same schema as
+``<filter>`` elements in tallies.xml), in order:
+
+1. The "i" filter (current fission-production region): a ``cell`` or ``mesh``
+   filter.
+2. The "j" filter (birth region): the matching ``cellborn`` or ``meshborn``
+   filter.
+3. *(Optional)* The "d" filter (delayed neutron family the source particle
+   was itself born as, 0 = prompt): a ``delayedgroupborn`` filter. If
+   omitted, only the family-aggregated :math:`k_{ij}` matrix is computed.
+
+If a mesh filter is used, the referenced ``<mesh>`` element must also be
+present as a direct child of ``<settings>`` (mirroring ``<entropy_mesh>``),
+since settings.xml is parsed before tallies.xml.
+
+  *Default*: none (feature disabled)
+
 ----------------------
 ``<inactive>`` Element
 ----------------------
