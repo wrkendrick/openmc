@@ -224,6 +224,16 @@ void read_settings_xml();
 //! \param[in] root XML node for <settings>
 void read_settings_xml(pugi::xml_node root);
 
+//! Read the <fission_matrix> element (region-to-region k_ij / k_dij).
+//!
+//! Must be called after geometry has been finalized, since its <filter>
+//! elements may reference cells by ID. This is deliberately separate from
+//! read_settings_xml(), which runs before geometry is available.
+void read_fission_matrix_xml();
+
+//! \param[in] root XML node for <settings>
+void read_fission_matrix_xml(pugi::xml_node root);
+
 void free_memory_settings();
 
 } // namespace openmc

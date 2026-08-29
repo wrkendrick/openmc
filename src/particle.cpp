@@ -230,12 +230,17 @@ void Particle::event_calculate_xs()
       cell_born() = lowest_coord().cell();
 
       // Region-to-region fission matrix (k_ij / k_dij): score this
-      // particle's starting weight into the s_j/s_dj denominator. This
-      // fires exactly once per primary source particle per generation --
+      // particle's starting weight into the s_j/s_dj denominator. This must
+      // fire exactly once per true generation-starting source particle --
       // fission secondaries in eigenvalue mode are routed to the shared
-      // fission bank rather than re-entering via from_source().
+      // fission bank rather than re-entering via from_source(), but (n,xn)
+      // multiplicity neutrons (and any other same-history secondaries) ARE
+      // revived via from_source() too (see event_revive_from_secondary()),
+      // which also resets cell_born() to C_NONE. Without the
+      // !secondary_track() check, every such secondary would be miscounted
+      // as an extra "source particle," inflating kij_s and biasing k_ij low.
       if (settings::kij_on && settings::run_mode == RunMode::EIGENVALUE &&
-          type() == ParticleType::neutron()) {
+          type() == ParticleType::neutron() && !secondary_track()) {
         accumulate_kij_source_particle(*this);
       }
     }
@@ -510,6 +515,12 @@ void Particle::event_revive_from_secondary(const SourceSite& site)
   }
 
   from_source(&site);
+
+  // This path revives a same-history secondary (e.g. an (n,xn) multiplicity
+  // neutron) directly, without going through initialize_particle_track(),
+  // so secondary_track() must be marked here too -- see the comment at its
+  // declaration in particle_data.h for why this matters to k_ij.
+  secondary_track() = true;
 
   n_event() = 0;
   if (!settings::use_shared_secondary_bank) {

@@ -563,6 +563,14 @@ private:
 
   bool trace_ {false};
 
+  // True if this track was (re)started from the local/shared secondary bank
+  // (e.g. an (n,xn) multiplicity neutron or a photon) rather than being a
+  // true generation-starting particle sampled from simulation::source_bank.
+  // Used to keep k_ij's per-generation source-weight denominator (see
+  // accumulate_kij_source_particle() in kij.cpp) from double-counting
+  // in-history secondaries as if they were independent starting particles.
+  bool secondary_track_ {false};
+
   double collision_distance_;
 
   int n_event_ {0};
@@ -745,6 +753,10 @@ public:
 
   // Shows debug info
   bool& trace() { return trace_; }
+
+  // True if this track is a secondary (revived from the local/shared
+  // secondary bank) rather than a true generation-starting source particle
+  bool& secondary_track() { return secondary_track_; }
 
   // Distance to the next collision
   double& collision_distance() { return collision_distance_; }

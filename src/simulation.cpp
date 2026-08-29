@@ -732,6 +732,11 @@ void initialize_particle_track(
     sample_source_particle(p, index_source);
   }
 
+  // Record whether this track is a true generation-starting source particle
+  // or a revived secondary (e.g. an (n,xn) multiplicity neutron) -- see
+  // accumulate_kij_source_particle() in kij.cpp for why this matters.
+  p.secondary_track() = is_secondary;
+
   p.current_work() = index_source - 1;
 
   // set identifier for particle

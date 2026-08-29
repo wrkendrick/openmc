@@ -434,6 +434,85 @@ void read_settings_xml()
   read_settings_xml(root);
 }
 
+void read_fission_matrix_xml(pugi::xml_node root)
+{
+  using namespace settings;
+  using namespace pugi;
+
+  if (!check_for_node(root, "fission_matrix"))
+    return;
+
+  if (run_mode != RunMode::EIGENVALUE) {
+    fatal_error("<fission_matrix> is only supported in k-eigenvalue mode.");
+  }
+
+  xml_node node_kij = root.child("fission_matrix");
+
+  vector<Filter*> kij_filters;
+  for (auto node_filt : node_kij.children("filter")) {
+    kij_filters.push_back(Filter::create(node_filt));
+  }
+
+  if (kij_filters.size() != 2 && kij_filters.size() != 3) {
+    fatal_error("<fission_matrix> must contain exactly two <filter> "
+                "elements (i, j) or three (i, j, d).");
+  }
+
+  Filter* i_filter = kij_filters[0];
+  Filter* j_filter = kij_filters[1];
+
+  bool i_is_cell = i_filter->type() == FilterType::CELL;
+  bool i_is_mesh = i_filter->type() == FilterType::MESH;
+  if (!i_is_cell && !i_is_mesh) {
+    fatal_error("The first <filter> in <fission_matrix> (region i) "
+                "must be a 'cell' or 'mesh' filter.");
+  }
+  if ((i_is_cell && j_filter->type() != FilterType::CELLBORN) ||
+      (i_is_mesh && j_filter->type() != FilterType::MESHBORN)) {
+    fatal_error("The second <filter> in <fission_matrix> (region j) "
+                "must be the matching '*born' counterpart of the first "
+                "filter's type ('cellborn' for 'cell', 'meshborn' for "
+                "'mesh').");
+  }
+
+  kij_i_filter = i_filter->index();
+  kij_j_filter = j_filter->index();
+
+  if (kij_filters.size() == 3) {
+    Filter* d_filter = kij_filters[2];
+    if (d_filter->type() != FilterType::DELAYED_GROUP_BORN) {
+      fatal_error("The third <filter> in <fission_matrix> (delayed "
+                  "group d) must be a 'delayedgroupborn' filter.");
+    }
+    kij_d_filter = d_filter->index();
+  }
+
+  kij_on = true;
+}
+
+void read_fission_matrix_xml()
+{
+  // Only relevant for eigenvalue runs, and only if settings.xml exists
+  // (mirrors the "plotting-mode has no settings.xml" allowance in
+  // read_settings_xml()).
+  std::string filename = settings::path_input + "settings.xml";
+  if (!file_exists(filename))
+    return;
+
+  // Re-parse settings.xml (called after geometry is finalized, so that
+  // <fission_matrix>'s cell-based filters can resolve against
+  // model::cell_map -- this is deliberately a second, separate parse of
+  // the same file rather than an earlier stored xml_node, since the
+  // pugi::xml_document read by read_settings_xml() has already gone out of
+  // scope by the time geometry is available).
+  pugi::xml_document doc;
+  auto result = doc.load_file(filename.c_str());
+  if (!result) {
+    fatal_error("Error processing settings.xml file.");
+  }
+  read_fission_matrix_xml(doc.document_element());
+}
+
 void read_settings_xml(pugi::xml_node root)
 {
   using namespace settings;
@@ -582,56 +661,12 @@ void read_settings_xml(pugi::xml_node root)
       }
     }
 
-    // Check for a region-to-region fission matrix (k_ij / k_dij) request
-    if (check_for_node(root, "fission_matrix")) {
-      if (run_mode != RunMode::EIGENVALUE) {
-        fatal_error(
-          "<fission_matrix> is only supported in k-eigenvalue mode.");
-      }
-
-      xml_node node_kij = root.child("fission_matrix");
-
-      vector<Filter*> kij_filters;
-      for (auto node_filt : node_kij.children("filter")) {
-        kij_filters.push_back(Filter::create(node_filt));
-      }
-
-      if (kij_filters.size() != 2 && kij_filters.size() != 3) {
-        fatal_error("<fission_matrix> must contain exactly two <filter> "
-                    "elements (i, j) or three (i, j, d).");
-      }
-
-      Filter* i_filter = kij_filters[0];
-      Filter* j_filter = kij_filters[1];
-
-      bool i_is_cell = i_filter->type() == FilterType::CELL;
-      bool i_is_mesh = i_filter->type() == FilterType::MESH;
-      if (!i_is_cell && !i_is_mesh) {
-        fatal_error("The first <filter> in <fission_matrix> (region i) "
-                    "must be a 'cell' or 'mesh' filter.");
-      }
-      if ((i_is_cell && j_filter->type() != FilterType::CELLBORN) ||
-          (i_is_mesh && j_filter->type() != FilterType::MESHBORN)) {
-        fatal_error("The second <filter> in <fission_matrix> (region j) "
-                    "must be the matching '*born' counterpart of the first "
-                    "filter's type ('cellborn' for 'cell', 'meshborn' for "
-                    "'mesh').");
-      }
-
-      kij_i_filter = i_filter->index();
-      kij_j_filter = j_filter->index();
-
-      if (kij_filters.size() == 3) {
-        Filter* d_filter = kij_filters[2];
-        if (d_filter->type() != FilterType::DELAYED_GROUP_BORN) {
-          fatal_error("The third <filter> in <fission_matrix> (delayed "
-                      "group d) must be a 'delayedgroupborn' filter.");
-        }
-        kij_d_filter = d_filter->index();
-      }
-
-      kij_on = true;
-    }
+    // Note: the <fission_matrix> element (region-to-region k_ij / k_dij) is
+    // NOT parsed here. It contains <filter> elements that may reference
+    // cells (via model::cell_map), which is not populated until geometry.xml
+    // is read -- much later in the initialization sequence than
+    // settings.xml. See read_fission_matrix_xml(), called after
+    // finalize_geometry() in initialize.cpp.
   }
 
   // Copy plotting random number seed if specified

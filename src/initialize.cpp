@@ -502,6 +502,10 @@ bool read_model_xml()
   // have been finalized (from geometry_aux.h)
   finalize_cell_densities();
 
+  // Read <fission_matrix> now that geometry is available -- its <filter>
+  // elements may reference cells by ID
+  read_fission_matrix_xml(settings_root);
+
   if (check_for_node(root, "tallies"))
     read_tallies_xml(root.child("tallies"));
 
@@ -549,6 +553,10 @@ void read_separate_xml_files()
   // Compute cell density multipliers now that material densities
   // have been finalized (from geometry_aux.h)
   finalize_cell_densities();
+
+  // Read <fission_matrix> now that geometry is available -- its <filter>
+  // elements may reference cells by ID
+  read_fission_matrix_xml();
 
   read_tallies_xml();
 

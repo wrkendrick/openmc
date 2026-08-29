@@ -117,8 +117,21 @@ void accumulate_kij_fission_site(const Particle& p, const SourceSite& site)
     return;
   int j = match_j.bins_[0];
 
+  // create_fission_sites() samples the number of banked sites as
+  // nu_t = wgt/simulation::keff * nu_fission/total -- the current
+  // k-effective estimate is deliberately divided out there as a
+  // population-control trick so the fission bank size stays near
+  // n_particles regardless of the system's true multiplication. Every other
+  // analog fission score in OpenMC multiplies back by simulation::keff to
+  // undo that normalization and recover the physical quantity (see e.g.
+  // "score = simulation::keff * bank.wgt;" in score_fission_eout,
+  // tally_scoring.cpp) -- p_ij must do the same, or it converges to
+  // keff_estimate/keff_estimate ~= 1 instead of the physical fission
+  // production.
+  double wgt = simulation::keff * site.wgt;
+
 #pragma omp atomic
-  simulation::kij_p(i, j) += site.wgt;
+  simulation::kij_p(i, j) += wgt;
 
   if (settings::kij_d_filter >= 0) {
     const auto& d_filter = *model::tally_filters[settings::kij_d_filter];
@@ -127,7 +140,7 @@ void accumulate_kij_fission_site(const Particle& p, const SourceSite& site)
     if (!match_d.bins_.empty()) {
       int d = match_d.bins_[0];
 #pragma omp atomic
-      simulation::kdij_p(i, j, d) += site.wgt;
+      simulation::kdij_p(i, j, d) += wgt;
     }
   }
 }
