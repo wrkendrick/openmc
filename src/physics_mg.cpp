@@ -1,5 +1,8 @@
 #include "openmc/physics_mg.h"
 
+#include <algorithm>
+#include <atomic>
+#include <cstdio>
 #include <stdexcept>
 
 #include "openmc/tensor.h"
@@ -22,6 +25,14 @@
 #include "openmc/weight_windows.h"
 
 namespace openmc {
+
+//! Material ID whose in-group scattering receives the scatter-kernel transport
+//! correction in scatter().
+constexpr int32_t TRANSPORT_CORRECTED_MATERIAL_ID {3};
+
+//! TEMPORARY DEBUG: number of transport-corrected in-group scatters to dump
+//! cross sections for. Set to 0 to silence. Remove once the data is verified.
+constexpr int TRXS_DEBUG_PRINTS {40};
 
 void collision_mg(Particle& p)
 {
@@ -83,11 +94,57 @@ void sample_reaction(Particle& p)
 
 void scatter(Particle& p)
 {
-  data::mg.macro_xs_[p.material()].sample_scatter(p.g_last(), p.g(), p.mu(),
-    p.wgt(), p.current_seed(), p.mg_xs_cache().t, p.mg_xs_cache().a);
+  auto& macro_xs = data::mg.macro_xs_[p.material()];
+  int t = p.mg_xs_cache().t;
+  int a = p.mg_xs_cache().a;
+
+  macro_xs.sample_scatter(
+    p.g_last(), p.g(), p.mu(), p.wgt(), p.current_seed(), t, a);
+
+  // Scatter-kernel transport correction. In the transport-corrected material,
+  // the correction delta = sigma_total,g - sigma_transport,g is applied by
+  // removing a delta-function forward-scattering component from the in-group
+  // scattering. An in-group scatter therefore only redirects the particle with
+  // probability (sigma_s,g->g - delta) / sigma_s,g->g; otherwise the particle
+  // continues along its original direction. Out-of-group scatters and all
+  // other materials are unaffected.
+  bool rotate = true;
+  if (p.g() == p.g_last() &&
+      model::materials[p.material()]->id() == TRANSPORT_CORRECTED_MATERIAL_ID) {
+    double scatter_xs = macro_xs.get_xs(
+      MgxsType::SCATTER, p.g_last(), &p.g(), nullptr, nullptr, t, a);
+    double total_xs = macro_xs.get_xs(MgxsType::TOTAL, p.g(), t, a);
+    double transport_xs = macro_xs.get_xs(MgxsType::TRANSPORT, p.g(), t, a);
+    double delta = total_xs - transport_xs;
+
+    // TEMPORARY DEBUG: dump the cross sections feeding the correction for the
+    // first TRXS_DEBUG_PRINTS in-group scatters in the corrected material. The
+    // counter is atomic so threads do not race, and the cap keeps this from
+    // flooding the run.
+    static std::atomic<int> n_trxs_printed {0};
+    if (n_trxs_printed.fetch_add(1) < TRXS_DEBUG_PRINTS) {
+      fmt::print(stderr,
+        "[trxs] mat_id={} g_in={} g_out={} total={:.6e} transport={:.6e} "
+        "delta={:.6e} scatter={:.6e} p_rotate={:.6f}\n",
+        model::materials[p.material()]->id(), p.g_last(), p.g(), total_xs,
+        transport_xs, delta, scatter_xs,
+        scatter_xs > 0. ? std::max(0., (scatter_xs - delta) / scatter_xs) : 1.0);
+    }
+
+    // delta can exceed the in-group scattering cross section, which would make
+    // the rotation probability negative. Clamp at zero: the correction can at
+    // most remove all of the in-group scattering's angular redistribution, it
+    // cannot remove more than exists.
+    if (scatter_xs > 0.) {
+      double p_rotate = std::max(0., (scatter_xs - delta) / scatter_xs);
+      rotate = prn(p.current_seed()) < p_rotate;
+    }
+  }
 
   // Rotate the angle
-  p.u() = rotate_angle(p.u(), p.mu(), nullptr, p.current_seed());
+  if (rotate) {
+    p.u() = rotate_angle(p.u(), p.mu(), nullptr, p.current_seed());
+  }
 
   // Update energy value for downstream compatability (in tallying)
   p.E() = data::mg.energy_bin_avg_[p.g()];

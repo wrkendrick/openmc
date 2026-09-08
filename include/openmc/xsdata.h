@@ -70,6 +70,9 @@ public:
   // The following quantities have the following dimensions:
   // [angle][incoming group]
   tensor::Tensor<double> total;
+  // Transport cross section. If the library does not provide one, this is
+  // filled with the total cross section so that (total - transport) is zero.
+  tensor::Tensor<double> transport;
   tensor::Tensor<double> absorption;
   tensor::Tensor<double> nu_fission;
   tensor::Tensor<double> prompt_nu_fission;

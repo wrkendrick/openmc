@@ -35,6 +35,7 @@ XsData::XsData(bool fissionable, AngleDistributionType scatter_format,
   // allocate all [temperature][angle][in group] quantities
   vector<size_t> shape {n_ang, n_g_};
   total = tensor::zeros<double>(shape);
+  transport = tensor::zeros<double>(shape);
   absorption = tensor::zeros<double>(shape);
   inverse_velocity = tensor::zeros<double>(shape);
   if (fissionable) {
@@ -119,6 +120,14 @@ void XsData::from_hdf5(hid_t xsdata_grp, bool fissionable,
   for (size_t i = 0; i < total.size(); i++)
     if (total.data()[i] == 0.0)
       total.data()[i] = 1.e-10;
+
+  // Get the transport x/s. This is optional; when it is absent the transport
+  // correction (total - transport) degenerates to zero.
+  if (object_exists(xsdata_grp, "transport")) {
+    read_nd_tensor(xsdata_grp, "transport", transport);
+  } else {
+    transport = total;
+  }
 }
 
 //==============================================================================
@@ -596,6 +605,7 @@ void XsData::combine(
       fatal_error("Cannot combine the XsData objects!");
     double scalar = scalars[i];
     total += scalar * that->total;
+    transport += scalar * that->transport;
     absorption += scalar * that->absorption;
     if (i == 0) {
       inverse_velocity = that->inverse_velocity;

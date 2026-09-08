@@ -288,6 +288,7 @@ constexpr int DEFAULT_NMU {33};
 // Mgxs::get_xs enumerated types
 enum class MgxsType {
   TOTAL,
+  TRANSPORT,
   ABSORPTION,
   INVERSE_VELOCITY,
   DECAY_RATE,

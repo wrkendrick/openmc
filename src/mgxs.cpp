@@ -430,6 +430,9 @@ double Mgxs::get_xs(MgxsType xstype, int gin, const int* gout, const double* mu,
   case MgxsType::TOTAL:
     val = xs_t->total(a, gin);
     break;
+  case MgxsType::TRANSPORT:
+    val = xs_t->transport(a, gin);
+    break;
   case MgxsType::NU_FISSION:
     val = fissionable ? xs_t->nu_fission(a, gin) : 0.;
     break;

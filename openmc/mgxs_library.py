@@ -190,6 +190,7 @@ class XSdata:
         self._num_polar = None
         self._num_azimuthal = None
         self._total = len(temperatures) * [None]
+        self._transport = len(temperatures) * [None]
         self._absorption = len(temperatures) * [None]
         self._scatter_matrix = len(temperatures) * [None]
         self._multiplicity_matrix = len(temperatures) * [None]
@@ -224,6 +225,7 @@ class XSdata:
             clone._num_polar = self._num_polar
             clone._num_azimuthal = self._num_azimuthal
             clone._total = copy.deepcopy(self._total, memo)
+            clone._transport = copy.deepcopy(self._transport, memo)
             clone._absorption = copy.deepcopy(self._absorption, memo)
             clone._scatter_matrix = copy.deepcopy(self._scatter_matrix, memo)
             clone._multiplicity_matrix = \
@@ -374,6 +376,10 @@ class XSdata:
         return self._total
 
     @property
+    def transport(self):
+        return self._transport
+
+    @property
     def absorption(self):
         return self._absorption
 
@@ -489,6 +495,7 @@ class XSdata:
         self.temperatures = temp_store
 
         self._total.append(None)
+        self._transport.append(None)
         self._absorption.append(None)
         self._scatter_matrix.append(None)
         self._multiplicity_matrix.append(None)
@@ -612,6 +619,34 @@ class XSdata:
 
         i = self._temperature_index(temperature)
         self._total[i] = total
+
+    def set_transport(self, transport, temperature=ROOM_TEMPERATURE_KELVIN):
+        """This method sets the transport cross section for this XSdata object
+        at the provided temperature.
+
+        The transport cross section is optional. When it is not provided, the
+        transport correction (total - transport) is treated as zero.
+
+        Parameters
+        ----------
+        transport: np.ndarray
+            Transport Cross Section
+        temperature : float
+            Temperature (in Kelvin) of the data. Defaults to room temperature
+            (294K).
+
+        """
+
+        # Get the accepted shapes for this xs
+        shapes = [self.xs_shapes["[G]"]]
+
+        # Convert to a numpy array so we can easily get the shape for checking
+        transport = np.asarray(transport)
+        check_value('transport shape', transport.shape, shapes)
+        self._check_temperature(temperature)
+
+        i = self._temperature_index(temperature)
+        self._transport[i] = transport
 
     def set_absorption(self, absorption, temperature=ROOM_TEMPERATURE_KELVIN):
         """This method sets the cross section for this XSdata object at the
@@ -1075,6 +1110,53 @@ class XSdata:
         i = self._temperature_index(temperature)
         self._total[i] = total.get_xs(nuclides=nuclide, xs_type=xs_type,
                                       subdomains=subdomain)
+
+    def set_transport_mgxs(self, transport, temperature=ROOM_TEMPERATURE_KELVIN,
+                           nuclide='total', xs_type='macro', subdomain=None):
+        """This method allows for an openmc.mgxs.TransportXS to be used to set
+        the transport cross section for this XSdata object.
+
+        Unlike :meth:`set_total_mgxs`, which stores a transport cross section
+        in place of the total, this stores it as a separate quantity so that
+        the transport correction (total - transport) remains available to
+        downstream solvers.
+
+        Parameters
+        ----------
+        transport: openmc.mgxs.TransportXS
+            MGXS Object containing the transport or nu-transport cross section
+            for the domain of interest.
+        temperature : float
+            Temperature (in Kelvin) of the data. Defaults to room temperature
+            (294K).
+        nuclide : str
+            Individual nuclide (or 'total' if obtaining material-wise data)
+            to gather data for.  Defaults to 'total'.
+        xs_type: {'macro', 'micro'}
+            Provide the macro or micro cross section in units of cm^-1 or
+            barns. Defaults to 'macro'.
+        subdomain : iterable of int
+            If the MGXS contains a mesh domain type, the subdomain parameter
+            specifies which mesh cell (i.e., [i, j, k] index) to use.
+
+        See also
+        --------
+        openmc.mgxs.Library.create_mg_library()
+        openmc.mgxs.Library.get_xsdata()
+
+        """
+
+        check_type('transport', transport, openmc.mgxs.TransportXS)
+        check_value('energy_groups', transport.energy_groups,
+                    [self.energy_groups])
+        check_value('domain_type', transport.domain_type,
+                    openmc.mgxs.DOMAIN_TYPES)
+        self._check_temperature(temperature)
+
+        i = self._temperature_index(temperature)
+        self._transport[i] = transport.get_xs(nuclides=nuclide,
+                                              xs_type=xs_type,
+                                              subdomains=subdomain)
 
     def set_absorption_mgxs(self, absorption, temperature=ROOM_TEMPERATURE_KELVIN,
                             nuclide='total', xs_type='macro', subdomain=None):
@@ -1828,7 +1910,8 @@ class XSdata:
         xsdata._xs_shapes = None
 
         for i, temp in enumerate(xsdata.temperatures):
-            for xs in ['total', 'absorption', 'fission', 'nu_fission',
+            for xs in ['total', 'transport', 'absorption', 'fission',
+                       'nu_fission',
                        'scatter_matrix', 'multiplicity_matrix',
                        'prompt_nu_fission', 'delayed_nu_fission',
                        'kappa_fission', 'chi', 'chi_prompt', 'chi_delayed',
@@ -2067,6 +2150,11 @@ class XSdata:
 
             xs_grp.create_dataset("total", data=self._total[i])
 
+            # Transport data is optional; when absent the transport correction
+            # is zero
+            if self._transport[i] is not None:
+                xs_grp.create_dataset("transport", data=self._transport[i])
+
             if self._absorption[i] is None:
                 raise ValueError('absorption data must be provided when '
                                  'writing the HDF5 library')
@@ -2278,7 +2366,8 @@ class XSdata:
 
         # Read the temperature-dependent datasets
         for temp, float_temp in zip(temperatures, float_temperatures):
-            xs_types = ['total', 'absorption', 'fission', 'kappa-fission',
+            xs_types = ['total', 'transport', 'absorption', 'fission',
+                        'kappa-fission',
                         'chi', 'chi-prompt', 'chi-delayed', 'nu-fission',
                         'prompt-nu-fission', 'delayed-nu-fission', 'beta',
                         'decay-rate', 'inverse-velocity']

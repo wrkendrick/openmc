@@ -1077,6 +1077,26 @@ class Library:
                                   nuclide=[nuclide],
                                   subdomain=subdomain)
 
+        # Store the transport cross section as its own quantity, independent of
+        # whether it was also used in place of the total above. This keeps the
+        # transport correction (total - transport) available downstream; when
+        # correction == 'P0' the total already holds the transport xs, so the
+        # correction correctly evaluates to zero rather than being applied
+        # twice.
+        if 'nu-transport' in self.mgxs_types:
+            mymgxs = self.get_mgxs(domain, 'nu-transport')
+            xsdata.set_transport_mgxs(mymgxs, temperature=temperature,
+                                      xs_type=xs_type,
+                                      nuclide=[nuclide],
+                                      subdomain=subdomain)
+
+        elif 'transport' in self.mgxs_types:
+            mymgxs = self.get_mgxs(domain, 'transport')
+            xsdata.set_transport_mgxs(mymgxs, temperature=temperature,
+                                      xs_type=xs_type,
+                                      nuclide=[nuclide],
+                                      subdomain=subdomain)
+
         if 'absorption' in self.mgxs_types:
             mymgxs = self.get_mgxs(domain, 'absorption')
             xsdata.set_absorption_mgxs(mymgxs,
