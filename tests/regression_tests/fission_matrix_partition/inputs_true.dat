@@ -1,0 +1,112 @@
+<?xml version='1.0' encoding='utf-8'?>
+<model>
+  <materials>
+    <material id="1" name="fuel" depletable="true">
+      <density value="10.2" units="g/cm3"/>
+      <nuclide name="U235" ao="0.5"/>
+      <nuclide name="U238" ao="0.5"/>
+      <nuclide name="O16" ao="1.9952412"/>
+      <nuclide name="O17" ao="0.000758"/>
+      <nuclide name="O18" ao="0.0040008"/>
+    </material>
+    <material id="2" name="water">
+      <density value="0.7" units="g/cm3"/>
+      <nuclide name="H1" ao="1.99968852"/>
+      <nuclide name="H2" ao="0.00031148"/>
+      <nuclide name="O16" ao="0.9976206"/>
+      <nuclide name="O17" ao="0.000379"/>
+      <nuclide name="O18" ao="0.0020004"/>
+      <sab name="c_H_in_H2O"/>
+    </material>
+  </materials>
+  <geometry>
+    <cell id="1" material="1" region="-1" universe="1"/>
+    <cell id="2" material="1" region="1 -2" universe="1"/>
+    <cell id="3" material="2" region="2 -3" universe="1"/>
+    <surface id="1" type="sphere" coeffs="0.0 0.0 0.0 10.0"/>
+    <surface id="2" type="sphere" coeffs="0.0 0.0 0.0 16.1"/>
+    <surface id="3" type="sphere" boundary="vacuum" coeffs="0.0 0.0 0.0 48.300000000000004"/>
+  </geometry>
+  <settings>
+    <run_mode>eigenvalue</run_mode>
+    <particles>4000</particles>
+    <batches>90</batches>
+    <inactive>10</inactive>
+    <source type="independent" strength="1.0" particle="neutron">
+      <space type="box">
+        <parameters>-16.1 -16.1 -16.1 16.1 16.1 16.1</parameters>
+      </space>
+      <constraints>
+        <fissionable>true</fissionable>
+      </constraints>
+    </source>
+    <ifp_n_generation>1</ifp_n_generation>
+    <fission_matrix>
+      <filter id="1" type="cell">
+        <bins>1 2</bins>
+      </filter>
+      <filter id="2" type="cellborn">
+        <bins>1 2</bins>
+      </filter>
+      <filter id="3" type="delayedgroupborn">
+        <bins>0 1 2 3 4 5 6</bins>
+      </filter>
+    </fission_matrix>
+  </settings>
+  <tallies>
+    <filter id="4" type="cell">
+      <bins>1</bins>
+    </filter>
+    <filter id="5" type="energy">
+      <bins>0.0 20000000.0</bins>
+    </filter>
+    <filter id="6" type="delayedgroup">
+      <bins>1 2 3 4 5 6</bins>
+    </filter>
+    <filter id="7" type="cell">
+      <bins>2</bins>
+    </filter>
+    <filter id="12" type="cell">
+      <bins>3</bins>
+    </filter>
+    <tally id="1">
+      <filters>4 5</filters>
+      <nuclides>total</nuclides>
+      <scores>nu-fission</scores>
+      <estimator>tracklength</estimator>
+    </tally>
+    <tally id="2">
+      <filters>4 6 5</filters>
+      <nuclides>total</nuclides>
+      <scores>delayed-nu-fission</scores>
+      <estimator>tracklength</estimator>
+    </tally>
+    <tally id="3">
+      <filters>7 5</filters>
+      <nuclides>total</nuclides>
+      <scores>nu-fission</scores>
+      <estimator>tracklength</estimator>
+    </tally>
+    <tally id="4">
+      <filters>7 6 5</filters>
+      <nuclides>total</nuclides>
+      <scores>delayed-nu-fission</scores>
+      <estimator>tracklength</estimator>
+    </tally>
+    <tally id="100" name="ifp_unfiltered">
+      <scores>ifp-time-numerator ifp-denominator</scores>
+    </tally>
+    <tally id="101" name="ifp_cell1">
+      <filters>4</filters>
+      <scores>ifp-time-numerator ifp-denominator</scores>
+    </tally>
+    <tally id="102" name="ifp_cell2">
+      <filters>7</filters>
+      <scores>ifp-time-numerator ifp-denominator</scores>
+    </tally>
+    <tally id="103" name="ifp_cell3">
+      <filters>12</filters>
+      <scores>ifp-time-numerator ifp-denominator</scores>
+    </tally>
+  </tallies>
+</model>

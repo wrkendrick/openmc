@@ -61,6 +61,17 @@ The current version of the statepoint file format is 18.2.
              mean of :math:`k_{d,ij}`, shape (n_i, n_j, n_d). Only present
              when ``<fission_matrix>`` includes a third (delayed group born)
              filter.
+           - **ell_mean** (*double[]*) -- Mean of the Kobayashi generation
+             time :math:`\ell_i` in seconds, shape (n_i,). Only present when
+             ``<fission_matrix>`` is specified in settings.xml.
+           - **ell_std_dev** (*double[]*) -- Standard deviation of the mean of
+             :math:`\ell_i` in seconds, shape (n_i,). Only present when
+             ``<fission_matrix>`` is specified in settings.xml.
+           - **ifp_n_generation** (*int*) -- Number of generations used by the
+             Iterated Fission Probability method. Only present when a tally
+             requested an IFP score. IFP scores are weighted by the number of
+             descendants this many generations later, so values from runs with
+             different counts are not directly comparable.
            - **n_realizations** (*int*) -- Number of realizations for global
              tallies.
            - **global_tallies** (*double[][2]*) -- Accumulated sum and

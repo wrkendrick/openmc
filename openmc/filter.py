@@ -24,7 +24,8 @@ from ._xml import get_elem_list, get_text
 _FILTER_TYPES = (
     'universe', 'material', 'cell', 'cellborn', 'surface', 'mesh', 'energy',
     'energyout', 'mu', 'musurface', 'polar', 'azimuthal', 'distribcell',
-    'delayedgroup', 'delayedgroupborn', 'energyfunction', 'cellfrom', 'materialfrom', 'legendre',
+    'delayedgroup', 'delayedgroupborn', 'energyfunction', 'cellfrom',
+    'materialfrom', 'legendre',
     'spatiallegendre', 'sphericalharmonics', 'zernike', 'zernikeradial', 'particle',
     'particleproduction', 'cellinstance', 'collision', 'time', 'parentnuclide',
     'weight', 'meshborn', 'meshsurface', 'meshmaterial', 'reaction',

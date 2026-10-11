@@ -1,0 +1,4 @@
+# Working directories the example scripts create for their cached statepoints
+two_region_work/
+ten_region_work/
+*.png

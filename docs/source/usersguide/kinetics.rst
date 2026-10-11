@@ -177,6 +177,46 @@ matrices can be read back from a statepoint file::
         kdij_mean = sp.kdij_mean        # shape (n_i, n_j, n_d), if requested
         kdij_std_dev = sp.kdij_std_dev
 
+Regional generation times
+-------------------------
+
+The same fission-site loop also estimates :math:`\ell_i`, the Kobayashi
+generation time of region :math:`i`,
+
+.. math::
+
+    \ell_i = \frac{\langle G_i^+, (1/v)\Phi \rangle}
+                   {\langle F_i \Phi \rangle}
+
+where :math:`G_i^+` solves the single-generation adjoint source problem
+:math:`\mathbf{A}^+ G_i^+ = \nu\Sigma_{fi}` and reads as the expected
+production in region :math:`i` at the *next* generation per neutron at a
+given point in phase space. It is reported alongside the matrices whenever
+``<fission_matrix>`` is active, with no extra settings and no extra tallies::
+
+    with openmc.StatePoint(output_path) as sp:
+        ell = sp.ell_mean               # shape (n_i,), seconds
+        ell_std_dev = sp.ell_std_dev
+
+:math:`\ell_i` is estimated with the fissioning particle's own 1/v track
+integral weighted by its own production in bin :math:`i`, so the time
+integral and the importance weighting belong to the same particle and the
+same event.
+
+.. note::
+    :math:`\ell_i` is **not** the IFP generation time
+    :math:`\Lambda_{\mathrm{eff}}` of the previous section, and the two
+    differ by more than the factor of :math:`k` that relates
+    :math:`\ell` and :math:`\Lambda`. An IFP score attributes an
+    *ancestor's* lifetime to a *descendant's* fission site, so its weighting
+    function is the number of descendants ``ifp_n_generation`` generations
+    later, which tends to the fundamental adjoint :math:`\Phi^+` as that
+    count grows. :math:`G_i^+` is the zero-lag, single-generation weight,
+    which no value of ``ifp_n_generation`` reproduces because at least one
+    generation of lag is required. Use :math:`\ell_i` for multipoint
+    kinetics and :math:`\Lambda_{\mathrm{eff}}` for conventional point
+    kinetics; do not mix them in one parameter set.
+
 .. only:: html
 
    .. rubric:: References

@@ -347,6 +347,53 @@ class StatePoint:
             return None
 
     @property
+    def ell_mean(self):
+        r"""numpy.ndarray or None : Mean of the Kobayashi generation time
+        ell_i [s], shape (n_i,), or None if the fission matrix was not
+        computed.
+
+        ``ell_i`` is the single-generation-importance-weighted mean time for
+        a neutron to produce the next generation in region ``i``,
+
+        .. math:: \ell_i = \langle G_i^+, (1/v)\Phi\rangle /
+                            \langle F_i \Phi \rangle
+
+        accumulated over the same fission sites and the same ``i`` filter
+        bins as :attr:`kij_mean`. It is *not* the same quantity as the IFP
+        generation time :math:`\Lambda_{\mathrm{eff}}`, which is weighted
+        by the fundamental adjoint rather than by the single-generation
+        importance :math:`G_i^+`; the two differ by more than the factor of
+        ``k`` relating :math:`\ell` and :math:`\Lambda`.
+        """
+        if self.run_mode == 'eigenvalue' and 'ell_mean' in self._f:
+            return self._f['ell_mean'][()]
+        else:
+            return None
+
+    @property
+    def ell_std_dev(self):
+        """numpy.ndarray or None : Standard deviation of the mean of ell_i
+        [s], shape (n_i,), or None if the fission matrix was not computed."""
+        if self.run_mode == 'eigenvalue' and 'ell_std_dev' in self._f:
+            return self._f['ell_std_dev'][()]
+        else:
+            return None
+
+    @property
+    def ifp_n_generation(self):
+        """int or None : Number of generations used by the Iterated Fission
+        Probability method, or None if IFP was not active.
+
+        Every IFP score is weighted by the number of descendants this many
+        generations later, so IFP results from runs with different values are
+        weighted differently and are not directly comparable.
+        """
+        if 'ifp_n_generation' in self._f:
+            return int(self._f['ifp_n_generation'][()])
+        else:
+            return None
+
+    @property
     def meshes(self):
         if not self._meshes_read:
             mesh_group = self._f['tallies/meshes']

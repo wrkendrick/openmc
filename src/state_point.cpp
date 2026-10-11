@@ -121,6 +121,16 @@ extern "C" int openmc_statepoint_write(const char* filename, bool* write_source)
     // Write out current batch number
     write_dataset(file_id, "current_batch", simulation::current_batch);
 
+    // Write the IFP generation count. Every IFP score is weighted by the
+    // number of descendants ifp_n_generation generations later, so the
+    // weighting function -- and hence the value of ifp-time-numerator and
+    // ifp-beta-numerator -- depends on this setting. Without it in the
+    // statepoint there is no way to tell from the output which weighting a
+    // run used, and IFP results from runs with different counts are not
+    // comparable. Write-only: on restart the value comes from the input.
+    if (settings::ifp_on)
+      write_dataset(file_id, "ifp_n_generation", settings::ifp_n_generation);
+
     // Indicate whether source bank is stored in statepoint
     write_attribute(file_id, "source_present", write_source_);
 
