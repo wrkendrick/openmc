@@ -738,6 +738,41 @@ def interpolate_case(base, perturbed, fraction):
         cell_ids=base.cell_ids)
 
 
+def temperature_weights(T_now, T_base, T_hot, basis='sqrt'):
+    """Interpolation weight for a case tabulated between T_base and T_hot.
+
+    Returns f in [0, 1] such that K(T) = K_0 + f * (K_hot - K_0).
+
+    `basis` selects the variable the interpolation is linear in:
+
+      'sqrt'   f = (sqrt(T) - sqrt(Tb)) / (sqrt(Th) - sqrt(Tb))
+               Doppler broadening goes as sqrt(T), so this is the right
+               choice for a FUEL perturbation.
+      'linear' f = (T - Tb) / (Th - Tb)
+               Moderator feedback is a spectral effect driven by the
+               Maxwellian and is closer to linear in T.
+
+    The two agree at both endpoints and differ in between -- by up to 26%
+    of the effect at the low end of a 300-1200 K tabulation. Interpolating
+    a Doppler perturbation linearly in T therefore UNDERESTIMATES it, worst
+    exactly where a mild transient lives.
+
+    One tabulated interval gives one slope. If the transient spans a wide
+    range, tabulate a third temperature and check that the chosen basis
+    actually linearizes the response rather than assuming it.
+    """
+    T_now = np.asarray(T_now, dtype=float)
+    if basis == 'sqrt':
+        num = np.sqrt(T_now) - np.sqrt(T_base)
+        den = np.sqrt(T_hot) - np.sqrt(T_base)
+    elif basis == 'linear':
+        num = T_now - T_base
+        den = T_hot - T_base
+    else:
+        raise ValueError(f"basis must be 'sqrt' or 'linear', got {basis!r}")
+    return num / den
+
+
 def combine_cases(base, cases, dT, deltas):
     """Evaluate an arbitrary temperature profile from tabulated cases.
 

@@ -13,10 +13,11 @@ The theory reference is Tommasi (2019). Section 2.1 gives the Kobayashi derivati
 
 Verification status:
 
-- Single-region MPK/PK identity: verified to 1e-11 relative on amplitude and precursors over a 60 s transient.
-- Fission-source partition identity: verified against the tallied coupling matrix to 4.6 pcm on a 10k-particle run.
-- Multi-region solver and temperature-coefficient formulation: verified on synthetic parameters only. Neither has been run against a converged OpenMC parameter set.
-- Two parameter-level discrepancies remain unresolved (Section 17).
+- Single-region MPK/PK identity: verified to 2.9e-15 relative on the amplitude over a 60 s transient, every parameter drawn from one statepoint. The earlier 1.6e-11 figure was limited by the ODE integrator, not the algebra; the spectral solver removed that floor.
+- Fission-source partition identity: verified against the tallied coupling matrix at 0.02 to 0.77 sigma on three independent geometries.
+- Multi-region solver and temperature-coefficient formulation: verified on real OpenMC parameter sets, not only synthetic ones. The two-region and ten-region examples in `examples/mpk/` run the full chain end to end.
+- `ell_m` is now tallied directly by the transport code at zero generation lag (Section 13). The IFP route it replaced is not equivalent, and the difference is not small.
+- Four of the five open issues in the first revision are resolved; see Section 18.
 
 Not covered: Avery's MPK formulation (Tommasi 2.2), thermal-hydraulic feedback coupling, and time-varying K(t) within a transient.
 
@@ -164,7 +165,7 @@ Every coupling coefficient is defined by its denominator, and the denominator sa
 | k^(i)\_mn | ⟨G\_m+, F\_dn^(i) Φ⟩ / ⟨F\_dn^(i) Φ⟩ | same, per **family-i delayed** neutron produced in n | `sp.kdij_mean[:, :, i]` |
 | beta\_n^(i) | ⟨ν\_d^(i) Σ\_fn Φ⟩ / ⟨F\_n Φ⟩ | raw delayed fraction, family i, region n — no importance weighting | `openmc.mgxs.Beta` |
 | beta\_mn | ⟨G\_m+, F\_dn Φ⟩ / ⟨G\_m+, F\_n Φ⟩ | importance-weighted delayed fraction of production | derived, not tallied |
-| ell\_m | ⟨G\_m+, (1/v) Φ⟩ / ⟨F\_m Φ⟩ | mean time for neutrons to reach m and produce the next generation | IFP numerator / denominator |
+| ell\_m | ⟨G\_m+, (1/v) Φ⟩ / ⟨F\_m Φ⟩ | mean time for neutrons to reach m and produce the next generation | `sp.ell_mean` (zero-lag estimator, Section 13) |
 
 Four consequences worth keeping in view.
 
@@ -172,9 +173,9 @@ Four consequences worth keeping in view.
 
 **Raw beta is a plain forward tally.** Eq.(18) has no adjoint in the beta\_n^(i) definition, so it is a ratio of reaction rates in region n and is available directly from `openmc.mgxs.Beta` with a one-group structure. It must not be replaced by OpenMC's IFP beta\_eff, which is adjoint-weighted and therefore an estimate of beta\_mn instead.
 
-**ell\_m is the Kobayashi generation time, not Lambda.** The two differ by a factor of k: ell = k · Lambda. Conflating them is a small error at k near unity (0.01% at k = 1.003) but it is the difference between an identity verified to 1e-11 and one verified to three digits.
+**ell\_m is the Kobayashi generation time, not Lambda.** Two separate distinctions hide here and only the first is small. The factor of k, ell = k · Lambda, is 0.01% at k = 1.003. The *weighting function* is the large one: ell uses the single-generation importance G\_m+, while OpenMC's Lambda\_eff uses the IFP chain, which approaches the fundamental adjoint Phi+ as the generation count grows. Measured on a water-reflected sphere those differ by 9.75%, and regionally by orders of magnitude. Section 13 gives the mechanism.
 
-**G\_m+ is a one-generation importance function.** It solves A+ G\_m+ = νΣ\_fm, a source problem, whereas the fundamental adjoint flux Φ+ solves an eigenvalue problem. For a single region with one fission spectrum the two are proportional, so ell = k·Lambda holds for any IFP generation count. With several fissionable nuclides, or several regions, they are not proportional, and the IFP generation count becomes a modelling choice (Section 13).
+**G\_m+ is a one-generation importance function.** It solves A+ G\_m+ = νΣ\_fm, a source problem, whereas the fundamental adjoint flux Φ+ solves an eigenvalue problem. The first revision of this manual asserted that for a single region with one fission spectrum the two are proportional, so that ell = k·Lambda would hold for any IFP generation count. That is wrong. Proportionality needs ∫χΦ+ dE to be spatially flat over the fissile region, which it is not even in a bare homogeneous sphere. The generation count is therefore not a modelling choice but a correctness requirement, and only g = 0 — unreachable through IFP — gives G\_m+. Hence the dedicated estimator.
 
 ## Exact reduction to point kinetics, N = 1
 
@@ -489,12 +490,13 @@ Run these in order. Each is cheap, each catches a distinct class of error, and t
 | # | check | expression | expected | catches |
 | --- | --- | --- | --- | --- |
 | 1 | Partition identity | reconstructed K vs tallied kij, elementwise in sigma | within 3 sigma | i/j transposition, beta on the wrong axis, mixed factorization |
+| 1b | Delayed importance ratio | beta\_eff / adjoint-weighted raw beta | within ~10% of 1 | unconverged or biased k^(i)\_mn, which check 1 cannot see |
 | 2 | Coupling sign and magnitude | all Kp, Kd non-negative; all near unity | positive | filter misconfiguration, bin misread |
 | 3 | Fundamental positivity | S0 all one sign | uniform sign | wrong eigenvalue selected, negative K entries from noise |
 | 4 | Reactivity scale | rho / beta\_eff | well inside 1 dollar | prompt-supercritical test case |
-| 5 | ell consistency | denominator-weighted mean of ell\_m vs unfiltered ell | equal | CellFilter not applied at progeny birth |
+| 5 | ell consistency | production-weighted mean of ell\_m vs the unfiltered value | equal | region binning applied at the wrong event |
 | 6 | N = 1 regression | MPK vs mapped PK | 1e-11 relative | any mapping regression |
-| 7 | Collapse identity | p\_eff + sum(btil) vs k | 1e-15 | wrong adjoint contraction |
+| 7 | Collapse identity | p\_eff + sum(btil) vs the **Rayleigh quotient** | 1e-15 | wrong adjoint contraction |
 | 8 | Stationarity | S(t)/S0 - 1 from the fundamental, K renormalized | 1e-13 | wrong initialization, (1-B) applied as a row scaling |
 | 9 | Gauge | sum(dS) under the 1^T gauge | 1e-19 | gauge not enforced |
 | 10 | First-order adequacy | alpha\_p · dT vs exact eigenvalue re-solve | a few % | dT too large for linearity |
@@ -504,13 +506,67 @@ Run these in order. Each is cheap, each catches a distinct class of error, and t
 
 ### Notes on the ones that matter most
 
-**Check 1 is the backbone.** It is the only test sensitive to an i/j transposition, because a transposed K has the same fundamental eigenvalue and will pass every eigenvalue-based check. Beta enters columnwise, indexed by the source region, so a transposition or a wrong beta axis breaks the identity elementwise. Make it fail loudly at parameter-load time.
+**Check 1 is the backbone for orientation, and only for orientation.** It is
+the only check sensitive to an i/j transposition, because a transposed K has
+the same fundamental eigenvalue and passes every eigenvalue-based test. But
+it is *not* a test of the delayed coefficients. The delayed half of the
+partition enters weighted by beta ~ 1e-3, so a large relative deficit in
+k^(i)\_mn is a small absolute deficit in K — and the deficit simply migrates
+into the prompt term, leaving K right and the prompt/delayed split wrong.
+Measured: the identity held to 0.4 sigma on a run whose delayed coefficients
+were simultaneously 40% low. Make it fail loudly at parameter-load time, but
+do not read it as a statement about Kd.
 
-**Check 5 is load-bearing and currently unverified.** The entire ell\_m recipe assumes OpenMC evaluates a spatial filter on IFP scores at the progeny's birth site. With one fissile cell the filter is nearly a no-op; with several it is essential. Run the same tally with and without the CellFilter and confirm the weighted mean matches. See Section 17.
+**Check 1b is what covers that gap.** Form beta\_eff from the delayed
+coupling coefficients, then form the same adjoint collapse with every
+k^(i)\_mn replaced by the tallied k\_mn, and take the ratio. Weighting both
+sides identically is what makes it meaningful when B varies between regions:
+on a two-core benchmark with B\_n of 386 and 984 pcm, a naive
+beta\_eff / mean(B) reads 0.61 where the properly weighted ratio is 0.84.
+The ratio should sit within about 10% of 1. A missing delayed count can only
+pull it down, so a value well below 1 is either real physics or a bias in
+k^(i)\_mn — and beta\_eff is the parameter a transient is most sensitive to.
 
-**Check 11 is the cheapest guard on the whole perturbation framework.** A single uniform-temperature run compared against the sum of per-region coefficients tests the entire chain — extraction, normalization, adjoint contraction — in one number.
+**Check 5 is now a property of the estimator, not an assumption.** With the
+zero-lag `ell_m` the region binning and the time integral come from the same
+event by construction. The IFP version of this check was verified to machine
+precision anyway (filtered and unfiltered agreed bit-for-bit), which is how
+the real cause of the ell discrepancy was identified as the generation count.
 
-**Check 12 distinguishes truncation from bugs.** A first-order prediction should have error scaling as dT squared. If halving dT does not quarter the error, the residual is not the second-order term. This is what exposed the mode-sum gauge mismatch: a first-order method whose error does not converge at second order is wrong, not merely approximate.
+**Check 7 is exact against the Rayleigh quotient, not against the
+eigenvalue.** Both sides of p\_eff + sum\_i btil^(i) = ⟨S+, K S0⟩/⟨S+, S0⟩
+are the same projection, so the identity is exact by construction. At the
+unperturbed state S0 and S+ are K's own eigenvectors and the Rayleigh
+quotient equals the eigenvalue, which is why the check reads as
+"p\_eff + sum(btil) == k" there. Once a perturbation is applied and the shape
+is held frozen at the base S0/S+ — exactly what the frozen-shape PK reference
+of Section 6 does — the two part company at second order in the perturbation.
+Measured: 3.3e-07 and 2.4e-06 on two real parameter sets, against 1e-16
+for the Rayleigh form. **A frozen-shape PK reference must take rho from the
+Rayleigh quotient**, or that second-order error lands in the MPK-minus-PK
+residual, where it is indistinguishable from the spatial effect the
+comparison exists to measure.
+
+**Check 11 is the cheapest guard on the whole perturbation framework.** A
+single uniform-temperature run compared against the sum of per-region
+coefficients tests extraction, normalization and the adjoint contraction in
+one number.
+
+**Check 12 distinguishes truncation from bugs.** A first-order prediction
+should have error scaling as dT squared. If halving dT does not quarter the
+error, the residual is not the second-order term. This is what exposed the
+mode-sum gauge mismatch.
+
+### A check the hierarchy did not have
+
+**S0 against an independently tallied fission source.** S0 is the
+fundamental eigenvector of the assembled coupling matrix; an ordinary
+`nu-fission` tally on the same regions is a completely different estimator
+reached by a different code path — the fission-matrix accumulators in the
+transport loop versus the normal tally framework. Agreement tests that K is
+built *and oriented* correctly, and unlike the eigenvalue it is sensitive to
+a transposition. Measured at 2.7% on a six-region HTGR parameter set. It
+costs one extra tally and is worth having.
 
 ## Part III — OpenMC Implementation
 
@@ -573,40 +629,134 @@ This tally validates independently: it gave B = 713.7 pcm against 709.7 pcm back
 
 ### Generation times
 
-OpenMC builds Lambda\_eff as `ifp-time-numerator / ifp-denominator / keff`, so the numerator-over-denominator ratio is k·Lambda = ell directly — the same relation established in Section 4. Setting the IFP generation count to 1 gives the one-generation importance G+ rather than the fundamental adjoint Phi+, which is what Kobayashi's definition requires.
+`ell_m` is tallied directly by the fork, in the same fission-site loop that
+builds `kij`, and is read from `StatePoint.ell_mean`. No tally setup and no
+settings are required: if `<fission_matrix>` is active, `ell_m` is reported.
 
 ```python
-settings.ifp_n_generation = 1          # NOT inside the tally loop
-for cell in fissile_cells:
-    t = openmc.Tally()
-    t.filters = [openmc.CellFilter(cell)]
-    t.scores = ['ifp-time-numerator', 'ifp-denominator']
-    tallies.append(t)
-# ell_m = numerator[m] / denominator[m]
+with openmc.StatePoint(path) as sp:
+    ell = sp.ell_mean        # shape (N,), seconds
 ```
 
-**This rests on an unverified assumption**: that OpenMC evaluates the spatial filter at the progeny's birth site rather than elsewhere in the ancestor's history. Add an unfiltered control tally in the same deck and check that the denominator-weighted mean of ell\_m equals the unfiltered ell. If it does not, the recipe is wrong and the fix is in the same fork machinery that already produces kdij — accumulate the ancestor's 1/v track integral alongside the progeny count, keyed on the `fission_matrix_i_filter` bin.
+At each banked fission site the estimator accumulates the fissioning
+particle's own 1/v track integral into the numerator of the i-bin the site
+was produced in, and the site's weight into the denominator:
 
-Use one generation count consistently across the MPK parameter set. A PK reference for comparison should use the default larger count, since the conventional PK derivation weights with Phi+, not G+.
+```
+ell_m = sum over fission sites in m of [ tau_p * w ]   /   sum of w
+```
+
+where `tau_p` is `Particle::lifetime()`, the elapsed time since that
+particle's birth. Both factors belong to the *same particle* and the *same
+event*, which is precisely what makes the ratio
+⟨G\_m+, (1/v)Φ⟩ / ⟨F\_m Φ⟩.
+
+#### Why not IFP, and why the difference is large
+
+The first revision of this manual built `ell_m` from an IFP score pair with
+`ifp_n_generation = 1` and a `CellFilter`. That recipe is wrong, for a reason
+that is structural rather than statistical.
+
+`ifp()` fires at the *parent's* fission and stores the parent's lifetime on
+the child's bank entry. `lifetimes[0]` is the oldest entry in the chain. At
+scoring time the spatial filter is evaluated where the *child* fissions. So
+at generation count g the weighting function is "expected production in
+region m at generation g+1 per neutron at this phase-space point". Kobayashi's
+G\_m+ is the g = 0 weight, and `ifp_n_generation >= 1` is enforced, so no
+setting of the IFP machinery can produce it.
+
+Two measurements settle this, both on one deck with one seed:
+
+- A `CellFilter` on an IFP score *is* evaluated at the fission site: filtered
+  and unfiltered IFP tallies on a single-fuel-region model came back
+  bit-identical (numerator 1.713828e-05 both), and a non-fissionable cell
+  scored exactly zero. The filter was never the problem.
+- The generation count is. On the same model `ell` was 1.954473e-05 s at
+  g = 1 and 1.780942e-05 s at g = 10 — a **9.75%** spread, which is the whole
+  of the discrepancy that the first revision recorded as an open issue.
+
+The regional contrast is worse than the global one. On a two-region
+split-fuel sphere the ratio ell\_2/ell\_1 fell as 3.24, 1.64, 1.21, 1.04,
+1.00 for g = 1, 2, 3, 5, 20: each extra generation multiplies the regional
+signal by roughly the system's dominance ratio, and by g = 20 the weighting
+is region-independent and all the spatial information is gone. The zero-lag
+estimator on the same model gives 832 — the end blocks and the centre of a
+reflected sphere differ by nearly three orders of magnitude in `ell`, because
+the inner region is fed only by fast neutrons while the outer shell also
+collects ~1e-4 s reflector returns.
+
+That the estimator is measuring this and not an artefact was checked by
+removing the reflector: on a bare sphere, where there is one fast population
+everywhere, the contrast is **0.96**, and a spectrum tally confirms 0.0% of
+production below 1 eV in the inner region against 21.5% in the outer when the
+reflector is present.
+
+**Use `ell_m` for MPK and `Lambda_eff` for conventional point kinetics, and
+never mix them in one parameter set.** They are weighted by different
+functions, not merely scaled by `k`.
 
 ### Settings hygiene
 
-`ifp_n_generation` must be at least 1 and no greater than the inactive batch count; OpenMC checks this before the run. Place it with the other settings rather than inside a tally loop, where it reads as a per-tally property. Confirm the inactive batch count is enough for the IFP chain to reach its asymptotic regime — 20 inactive batches is marginal.
+The MPK parameter set needs no IFP tally at all. If you add one anyway, to
+produce a conventional point-kinetics reference for comparison, use the
+*default* generation count: the conventional PK derivation weights with
+Phi+, not G+. `ifp_n_generation` must be at least 1 and no greater than the
+inactive batch count, and belongs with the other settings rather than inside
+a tally loop.
+
+The statepoint now records `ifp_n_generation` whenever IFP is active. It
+previously did not, and that omission is the direct cause of the three
+parameter-level "discrepancies" in the first revision: there was no way to
+tell from a statepoint which weighting its IFP numbers carried.
 
 ## Statistics and the run matrix
 
 Monte Carlo noise, not solver cost, is the binding constraint on this method. The coupling matrix has N² elements, each needing good statistics, and the delayed off-diagonals are the sparsest scores in the problem.
 
+### Two constraints, satisfied by different knobs
+
+**Total histories** set the uncertainty on k\_mn, on k-effective, and hence
+on every reactivity difference. These scale as 1/sqrt(N) and are helped
+equally by more particles or more batches.
+
+**Particles per generation** set whether the delayed coefficients exist at
+all. This is the constraint that is easy to miss and impossible to fix after
+the fact. See the new open issue in Section 18: a generation whose (region,
+family) source bin is empty carries no information about that element, and
+the sparsest such bin is of order 1e-5 of the source bank. More batches does
+not help; only more particles per batch does.
+
+Keep at least ~200 **active** batches whatever the particle count, because
+k\_ij and ell\_m take their variance from the spread across generations. A
+handful of very large batches gives a good mean with a badly determined
+uncertainty.
+
 ### Measured uncertainties
 
-From a 25,000-particle, 180-active-batch run (4.5e+06 histories), single region:
+From a 25,000-particle, 180-active-batch run (4.5e+06 histories), single
+region:
 
 | quantity | 1-sigma |
 | --- | --- |
 | kij | 6.5e-04, i.e. 65 pcm on rho |
 | kdij delayed bins, relative | 1.2% to 4.2% |
 
-A 10,000-particle run of the same model moved the delayed importance ratios substantially — group 1 by 14%, with group 3 crossing below unity — and the per-group ratio of IFP beta to mapped beta scattered over 0.81 to 1.27, which is what pure noise looks like. **10,000 particles per batch is far too few for the delayed coupling coefficients.** Plan on 1e+05 to 1e+06.
+On a harder problem — an eleven-region axial partition of a prismatic HTGR
+with explicit TRISO, 2.6e+05 histories at 2,000 particles per batch — the
+same quantities read:
+
+| quantity | value |
+| --- | --- |
+| max relative sigma on k\_mn in the tridiagonal band | 3.8% |
+| sigma(k-effective) | 174 pcm |
+| delayed coefficients exactly zero | 64% |
+| median relative sigma on the non-zero ones | 52% |
+
+The zero fraction is the particles-per-generation constraint biting, not the
+history count. Scaling that run to 3e+07 histories at 100,000 particles per
+batch projects the band to 0.35%, sigma(k) to 16 pcm, the sparsest delayed
+bin to 1.8 neutrons per generation (84% of generations contributing), and the
+band delayed coefficients to a median 4.8%.
 
 ### History requirement for a temperature coefficient
 
@@ -666,15 +816,14 @@ with openmc.StatePoint(path) as sp:
     kdij, kdij_sd = np.asarray(sp.kdij_mean), np.asarray(sp.kdij_std_dev)
 
     beta_raw = np.zeros((N, D))          # [n, i]  SOURCE region
-    ell, ell_den = np.zeros(N), np.zeros(N)
+    lam_region = np.zeros((N, D))
+    ell = np.asarray(sp.ell_mean)        # (N,) seconds -- no tally needed
     for a, cid in enumerate(CELL_IDS):
         nu  = _find_tally(sp, ['nu-fission'], cid).mean.ravel()[0]
         dnu = _find_tally(sp, ['delayed-nu-fission'], cid).mean.ravel()
+        dec = _find_tally(sp, ['decay-rate'], cid).mean.ravel()
         beta_raw[a] = dnu / nu
-        t = _find_tally(sp, ['ifp-time-numerator', 'ifp-denominator'], cid)
-        num = t.get_values(scores=['ifp-time-numerator']).ravel()[0]
-        den = t.get_values(scores=['ifp-denominator']).ravel()[0]
-        ell[a], ell_den[a] = num / den, den
+        lam_region[a] = dec / dnu          # per-region decay constants
 
 Kp = kdij[:, :, 0]                       # (N, N)
 Kd = np.moveaxis(kdij[:, :, 1:], 2, 0)   # (D, N, N)
@@ -797,42 +946,118 @@ This particular synthetic model is row/column-separable by construction, so the 
 
 ### Reference scripts
 
+Everything lives in `examples/mpk/` in the fork and is importable as one
+module rather than scattered across notebooks.
+
 | script | purpose |
 | --- | --- |
-| `mpk_pk_identity.py` | synthetic-parameter proof of the N=1 reduction, independent of OpenMC |
-| `comparison_fixed.py` | single-region extraction and identity check from one statepoint |
-| `comparison_2region.py` | two-region extraction, partition check, adjoint collapse |
-| `mpk_multiregion.py` | MPKParams container, generator assembly, solver benchmarks |
-| `mpk_temperature_coefficients.py` | Gamma, alpha\_p, W, bordered sensitivity, checks 10 through 13 |
+| `mpk.py` | the implementation: deck construction, extraction, validating `MPKParams`, spectral solver, bordered sensitivity, contribution matrix |
+| `two_region.py` | two coupled cores either side of an absorber: the smallest model with a shape effect PK cannot represent |
+| `ten_region.py` | axially segmented PWR pin: banded K, zone-grouped sensitivity, locality of Gamma |
+| `selftest.py` | exact-algebra checks on `mpk.py`, no OpenMC needed |
+
+The synthetic invariants of the formulation are locked in
+`tests/test_mpk_invariants.py`, and the estimators themselves in
+`tests/regression_tests/fission_matrix*/`.
+
+### Regions by mesh rather than by cell
+
+`settings.fission_matrix_{i,j}_filter` accepts `MeshFilter`/`MeshBornFilter`
+as well as the cell pair. This matters whenever the fuel sits deep in a
+universe hierarchy and every instance shares one universe object — a
+prismatic block core, a pin lattice — where a `CellFilter` cannot separate
+regions without cloning the geometry once per region. A mesh partitions by
+position and needs no geometry change at all. A `RectilinearMesh` lets the
+region boundaries follow whatever partition the study actually uses.
 
 ## Open issues
 
-Five items, ordered by how much they block further work.
+Of the five items in the first revision, four are resolved. They had a single
+common cause, and it was not the one suspected.
 
-### 1. ell / k does not match Lambda\_IFP
+### 1. ell / k vs Lambda\_IFP — RESOLVED
 
-Measured ell/k = 1.974e-05 s against Lambda\_IFP = 1.810e-05 s, a 9.1% gap, on a single region. For one region this should not happen: with a single fission spectrum G+ is exactly proportional to Phi+, so ell = k·Lambda for any IFP generation count. Two fissionable nuclides with different emission spectra plus distinct delayed spectra break exact proportionality, but not by nine percent.
+Recorded as a 9.1% gap with the `CellFilter` on the IFP scores as prime
+suspect. The filter was innocent: filtered and unfiltered IFP tallies in one
+deck came back **bit-identical**, and a non-fissionable cell scored exactly
+zero. The entire gap is the IFP generation count. On one deck with one seed,
+`ell` was 1.954473e-05 s at `ifp_n_generation = 1` and 1.780942e-05 s at 10,
+a 9.75% spread. The comparison was never an identity: `ell` wants the
+single-generation importance G\_m+ and Lambda\_eff wants the fundamental
+adjoint, and no IFP generation count produces the former. Superseded by the
+zero-lag estimator of Section 13.
 
-Leading suspicion is the `CellFilter` on the IFP scores. With one fissile cell it should be a no-op. **Test: run the same IFP tally with and without the filter and confirm they agree.** If they do not, the filter is not being evaluated at the progeny birth site, and the multi-region ell\_m recipe of Section 13 does not hold either. This blocks every multi-region result, so it should be resolved first.
+### 2. beta\_mn vs beta\_IFP — RESOLVED, same cause
 
-### 2. beta\_mn does not match beta\_IFP
+Recorded as 18 pcm apart. Measured on a single deck at matched weighting:
+beta\_mn = 755.72 pcm against beta\_IFP = 746.69 pcm at `ifp_n_generation = 1`,
+**1.2% apart**. At generation count 10 the IFP value is 693.80 pcm, 8.9%
+away. The quantities agree when weighted the same way; the original gap was
+an unrecorded generation-count mismatch plus noise.
 
-beta\_mn derived from the tallied pieces gave 756.3 pcm against beta\_IFP = 774.4 pcm from the same geometry — an 18 pcm gap, two routes to the same physical quantity differing by G+ versus Phi+ weighting and by IFP generation count. Same order as issue 1 and possibly the same underlying cause. Worth tracking alongside it rather than separately.
+### 3. beta\_eff / beta running "the wrong way" — RESOLVED, same cause
 
-### 3. The raw-to-effective beta ratio runs the wrong way for a thermal system
+Recorded as 1.078, above unity, flagged as unusual for a water-moderated
+system and tentatively attributed to U-238 threshold fission. It is an
+artefact of the weighting. On the same deck the ratio is 1.0462 at
+`ifp_n_generation = 1` and **0.9721 at 10** — below unity, the normal
+direction for a thermal system. Do not publish the U-238 explanation.
 
-Measured beta\_eff / beta = 1.078, with every k^(i)/k above unity, meaning delayed neutrons are *more* important than average. For a water-moderated thermal system this ratio is normally slightly below unity. A 50/50 U-235/U-238 fuel at 10.2 g/cm3 in a 16.1 cm sphere is probably hard-spectrum enough for the U-238 threshold-fission importance effect to dominate, which would make this physical. It has not been confirmed. Since it is exactly the quantity the mapping hinges on, confirm it before publishing any derived coefficient.
+### 4. Delayed-group half-lives for a mixed fuel — RESOLVED
 
-### 4. Delayed-group half-lives for a two-nuclide fuel
+Replaced by a `decay-rate` mgxs tally on the same regions, sharing the
+`delayed-nu-fission` denominator with the raw beta tally. Measured on a
+Pu-239/U-238 plus U-235 two-core model, the tallied constants differ from the
+hard-coded ENDF U-235 six-group values by up to **22%** (group 5: 0.888 vs
+1.136 s^-1), while agreeing between the two regions to 0.03-3.5%, which is
+the genuine nuclide-mix difference.
 
-The implementation hard-codes ENDF U-235 six-group half-lives. OpenMC's delayed group index is nuclide-specific, and U-235 and U-238 have different decay constants for the same group number. This does not break the MPK/PK identity, since both sides use the same lambda, but it makes the absolute time response wrong for a mixture where U-238 fast fission is significant — which the previous item suggests is the case here. Replace with a `decay-rate` mgxs tally on the same cell filter.
+### 5. Locality of Gamma — STILL OPEN
 
-### 5. Locality of Gamma, and the region-count decision
+Unchanged in substance, and now measurable. The contribution matrix W and a
+locality fraction — the share of |dK/dT\_p| carried by the perturbed region's
+own rows and columns, compared against the share of the matrix those occupy —
+are reported by the example scripts. On a ten-region pin at modest statistics
+the fraction sat close to the baseline share, i.e. Gamma is *not* obviously
+concentrated. But at those statistics the noise floor dominates it, and noise
+spreads |Gamma| uniformly, so the measurement is an upper bound on
+delocalization rather than an answer. It needs a converged Gamma.
 
-Unknown and consequential. If Gamma\_mn,p is concentrated in row p and column p, the sensitivity data scales as N rather than N³ and a sparse parameterization is viable. If it is not, a P-region study needs N²·P well-converged elements, which at N = 20 is 8,000 numbers each requiring the history counts of Section 14. The synthetic test model is separable by construction and cannot answer this. Run two or three regions on the real geometry and inspect the |Gamma| map before committing.
+### A new issue the first revision did not have
+
+**k\_dij was biased by its own generation averaging.** `k_dij` is the
+across-generation mean of a ratio p/s, where s is the starting weight of
+neutrons of birth type i born in region n. The original implementation set
+that ratio to **zero** for any generation whose (n, i) bin was empty and
+averaged those zeros in, biasing the estimate toward zero in proportion to
+how often the bin was empty.
+
+Two properties made it hard to see:
+
+- It scales with particles per **generation**, not with total histories.
+  Running more batches does not reduce it, so the result looks converged and
+  its reported standard deviation looks small.
+- The partition identity does not catch it, for the reason given under
+  check 1.
+
+Measured on a ten-region pin: two runs of nearly equal total histories
+disagreed by **17%** on beta\_eff purely because of their generation size
+(576 pcm at 10,000 particles/batch against 673 at 20,000). After excluding
+empty generations from the mean and the variance, counted per element, the
+same comparison agrees to 1.2%, and the fitted per-family importance ratios
+went from `[0.29, 0.78, 0.71, 1.01, 0.78, 0.50]` to
+`[1.07, 1.01, 1.00, 1.03, 1.06, 1.04]`. Single- and two-region models were
+never affected, which is why it survived until a ten-region case existed.
+
+The practical consequence is a sizing rule, not just a bug fix: **the
+particle count per batch must be large enough that the sparsest (region,
+family) source bin is populated in most generations.** That bin is
+beta^(i) x S0\_n of the bank — of order 1e-5 — so it sets a floor of tens of
+thousands of particles per batch independent of how many batches you run.
 
 ### Secondary items
 
-- `ifp_n_generation = 1` has not been checked against 20 inactive batches for asymptotic convergence of the IFP chain.
-- Off-diagonal delayed coupling coefficients — delayed neutrons born in n causing fission in m — are the sparsest scores in the problem and will set the statistical floor on every multi-region result. No converged estimate of their uncertainty exists yet.
-- The multi-region solver and the full temperature-coefficient chain have been exercised only on synthetic parameters.
+- Off-diagonal delayed coupling coefficients remain the sparsest scores in
+  the problem and set the statistical floor on every multi-region result.
+- The locality question above is the one that decides whether the method
+  scales past a handful of regions.
